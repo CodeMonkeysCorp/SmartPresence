@@ -45,5 +45,10 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_smartpresence._tcp</string> </array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>O SmartPresence precisa acessar a rede local para encontrar o professor e conectar à chamada.</string>
 </dict>
 </plist>

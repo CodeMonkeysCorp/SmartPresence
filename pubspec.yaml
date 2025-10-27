@@ -9,10 +9,27 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  shared_preferences: ^2.3.2
-  path_provider: ^2.1.2
-  csv: ^5.1.1
-  provider: ^6.1.5+1
+  
+  # Pacote que faltava (para pt_BR)
+  flutter_localizations:
+    sdk: flutter
+
+  # Comunicação WebSocket
+  web_socket_channel: ^2.4.5 
+  
+  # Descoberta de Rede Local (NSD / mDNS)
+  nsd: ^4.0.3
+
+  # Salvar configurações de horário do professor
+  shared_preferences: ^2.2.3
+  
+  # Para formatar datas e horas
+  intl: ^0.20.2
+
+  network_info_plus: ^5.0.3
+
+  logging: ^1.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
