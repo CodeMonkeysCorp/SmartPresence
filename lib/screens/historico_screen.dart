@@ -1,27 +1,27 @@
 import 'package:flutter/material.dart';
-import 'package:logging/logging.dart'; // 1. Importar o logging
+import 'package:logging/logging.dart';
 
-// 2. Criar a instância do Logger
 final _log = Logger('HistoricoScreen');
 
 class HistoricoScreen extends StatelessWidget {
-  // Recebe o mapa de presenças do ProfessorHostScreen
-  // Estrutura: { 'Nome Aluno': { 'Rodada 1': 'Presente', 'Rodada 2': 'Ausente', ... }, ... }
+  // O mapa de presenças agora é { "matricula": { "Rodada 1": "Presente", ... } }
   final Map<String, Map<String, String>> presencas;
+  // O mapa de nomes é { "matricula": "Nome do Aluno" }
+  final Map<String, String> alunoNomes;
 
-  const HistoricoScreen({super.key, required this.presencas});
+  const HistoricoScreen({
+    super.key,
+    required this.presencas,
+    required this.alunoNomes,
+  });
 
   @override
   Widget build(BuildContext context) {
-    // 3. Adicionar log de informação
     _log.info(
-      'Construindo tela de histórico com ${presencas.length} registros de alunos.',
+      "Construindo tela de histórico com ${presencas.length} registros.",
     );
-
-    // Cria a lista de Widgets a serem exibidos na ListView
     List<Widget> historicoWidgets = [];
 
-    // Se o mapa de presenças estiver vazio
     if (presencas.isEmpty) {
       historicoWidgets.add(
         Center(
@@ -50,88 +50,90 @@ class HistoricoScreen extends StatelessWidget {
         ),
       );
     } else {
-      // Ordena os nomes dos alunos alfabeticamente para exibição consistente
-      List<String> nomesAlunosOrdenados = presencas.keys.toList()..sort();
+      // Pega as matrículas (chaves) e as ordena
+      // Você pode querer ordenar pelo nome do aluno depois, se preferir
+      List<String> matriculasOrdenadas = presencas.keys.toList()..sort();
 
-      // Itera sobre cada aluno no mapa de presenças
-      for (var nomeAluno in nomesAlunosOrdenados) {
-        final presencasRodadas = presencas[nomeAluno]!;
+      for (var matricula in matriculasOrdenadas) {
+        // Busca o nome do aluno no mapa _alunoNomes
+        // Se não encontrar (improvável), usa a matrícula como fallback
+        final nomeAluno = alunoNomes[matricula] ?? 'Aluno (Mat: $matricula)';
+        final presencasRodadas = presencas[matricula]!;
 
         // Adiciona um cabeçalho para o aluno
         historicoWidgets.add(
           Padding(
             padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 8.0),
-            child: Text(
-              nomeAluno,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
+            // Mostra Nome e Matrícula
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  nomeAluno,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                Text(
+                  'Matrícula: $matricula', // Mostra a matrícula abaixo do nome
+                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                ),
+              ],
             ),
           ),
         );
 
-        // Se não houver registros de rodadas para este aluno (improvável, mas seguro)
+        // Se não houver registros de rodadas para este aluno
         if (presencasRodadas.isEmpty) {
           historicoWidgets.add(
             const ListTile(
+              dense: true,
               leading: Icon(Icons.info_outline, color: Colors.grey),
               title: Text('Nenhuma rodada registrada para este aluno.'),
             ),
           );
         } else {
-          // Cria uma lista ordenada das rodadas (ex: "Rodada 1", "Rodada 2", ...)
+          // Cria uma lista ordenada das rodadas
           List<String> rodadasOrdenadas = presencasRodadas.keys.toList()
             ..sort((a, b) {
-              // Extrai o número da rodada para ordenação numérica
               int numA = int.tryParse(a.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
               int numB = int.tryParse(b.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
               return numA.compareTo(numB);
             });
 
-          // Itera sobre as rodadas ordenadas para este aluno
+          // Itera sobre as rodadas ordenadas
           for (var nomeRodada in rodadasOrdenadas) {
-            final status =
-                presencasRodadas[nomeRodada] ?? 'Desconhecido'; // Status padrão
+            final status = presencasRodadas[nomeRodada] ?? 'Desconhecido';
 
-            // Define cor e ícone com base no status da presença
             Color statusColor = Colors.grey;
-            IconData statusIcon = Icons.help_outline; // Ícone padrão (?)
+            IconData statusIcon = Icons.help_outline;
             if (status == 'Presente') {
-              statusColor = Colors.green.shade700; // Verde mais escuro
-              statusIcon = Icons.check_circle_outline_rounded; // Check
+              statusColor = Colors.green.shade700;
+              statusIcon = Icons.check_circle_outline_rounded;
             } else if (status == 'Ausente') {
-              statusColor = Colors.red.shade700; // Vermelho mais escuro
-              statusIcon = Icons.highlight_off_rounded; // X
+              statusColor = Colors.red.shade700;
+              statusIcon = Icons.highlight_off_rounded;
             } else if (status == 'Falhou PIN') {
-              statusColor = Colors.orange.shade800; // Laranja mais escuro
-              statusIcon = Icons.warning_amber_rounded; // Alerta
+              statusColor = Colors.orange.shade800;
+              statusIcon = Icons.warning_amber_rounded;
             }
 
-            // Adiciona um Card para cada registro de rodada
             historicoWidgets.add(
               Card(
+                // Usa o tema do card definido no main.dart
                 margin: const EdgeInsets.symmetric(
                   horizontal: 16.0,
                   vertical: 4.0,
-                ), // Margens
-                elevation: 1, // Sombra leve
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: ListTile(
-                  leading: Icon(
-                    statusIcon,
-                    color: statusColor,
-                    size: 28,
-                  ), // Ícone de status
+                  leading: Icon(statusIcon, color: statusColor, size: 28),
                   title: Text(
                     nomeRodada,
                     style: const TextStyle(fontWeight: FontWeight.w500),
-                  ), // Nome da rodada
+                  ),
                   trailing: Text(
-                    // Status à direita
                     status,
                     style: TextStyle(
                       color: statusColor,
@@ -139,7 +141,7 @@ class HistoricoScreen extends StatelessWidget {
                       fontSize: 14,
                     ),
                   ),
-                  dense: true, // Torna o ListTile um pouco mais compacto
+                  dense: true,
                 ),
               ),
             );
@@ -150,21 +152,17 @@ class HistoricoScreen extends StatelessWidget {
           const Divider(height: 24, thickness: 1, indent: 16, endIndent: 16),
         );
       }
-      // Remove o último divisor para não ficar sobrando espaço no final
+      // Remove o último divisor
       if (historicoWidgets.isNotEmpty && historicoWidgets.last is Divider) {
         historicoWidgets.removeLast();
       }
     }
 
-    // Retorna o Scaffold com la AppBar e a ListView contendo os widgets criados
     return Scaffold(
       appBar: AppBar(title: const Text('Histórico de Presença')),
       body: ListView(
-        // Usa ListView para permitir rolagem se houver muitos registros
-        padding: const EdgeInsets.only(
-          bottom: 16.0,
-        ), // Padding na parte inferior
-        children: historicoWidgets, // Adiciona a lista de widgets criada
+        padding: const EdgeInsets.only(bottom: 16.0),
+        children: historicoWidgets,
       ),
     );
   }

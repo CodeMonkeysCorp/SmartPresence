@@ -1,12 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:logging/logging.dart'; // 1. Importar o logging
-import 'package:nsd/nsd.dart'; // Pacote de descoberta NSD
-import 'package:web_socket_channel/web_socket_channel.dart'; // Pacote WebSocket
+import 'package:logging/logging.dart';
+import 'package:nsd/nsd.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'aluno_wait_screen.dart'; // Tela seguinte
 
-// 2. Criar a instância do Logger
 final _log = Logger('AlunoJoinScreen');
 
 class AlunoJoinScreen extends StatefulWidget {
@@ -26,10 +24,11 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
   Discovery? _discovery; // Objeto de descoberta NSD
   WebSocketChannel? _channel; // Canal de comunicação WebSocket
 
-  // Dados do aluno (placeholder - idealmente viria de um login ou config)
-  final String _nomeAluno = "Aluno Convidado"; // TODO: Permitir inserir nome
-  final TextEditingController _ipController =
-      TextEditingController(); // Para IP manual
+  // --- CONTROLES PARA DADOS DO ALUNO (NOVO) ---
+  final _formKey = GlobalKey<FormState>(); // Chave para validar o formulário
+  final TextEditingController _nomeController = TextEditingController();
+  final TextEditingController _matriculaController = TextEditingController();
+  final TextEditingController _ipController = TextEditingController();
 
   // "Trava" para evitar múltiplas tentativas de conexão simultâneas
   bool _isConnecting = false;
@@ -37,7 +36,6 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
   @override
   void initState() {
     super.initState();
-    _log.info('initState: Iniciando descoberta após 500ms.');
     // Atraso inicial para a UI carregar antes de iniciar a descoberta
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
@@ -49,24 +47,35 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
 
   @override
   void dispose() {
-    _log.info('dispose: Parando descoberta e fechando conexões.');
     _stopDiscovery(); // Garante que a descoberta pare ao sair
     _channel?.sink.close(); // Fecha o canal WebSocket se estiver aberto
-    _ipController.dispose(); // Limpa o controller do TextField
+    _ipController.dispose();
+    _nomeController.dispose(); // Limpa o controller
+    _matriculaController.dispose(); // Limpa o controller
     super.dispose();
   }
 
   // --- Lógica de Rede ---
 
+  // Valida os campos de nome e matrícula
+  bool _validateStudentFields() {
+    if (_formKey.currentState == null || !_formKey.currentState!.validate()) {
+      _log.warning('Validação falhou. Nome ou Matrícula estão vazios.');
+      setState(() {
+        _statusMessage = 'Por favor, preencha seu Nome e Matrícula.';
+        _statusIcon = Icons.error_outline_rounded;
+        _statusColor = Colors.red;
+      });
+      return false;
+    }
+    return true;
+  }
+
   // 1. Inicia a procura (NSD) pelo serviço do professor
   Future<void> _startDiscovery() async {
     // Não inicia se já estiver tentando conectar ou já conectado
-    if (_isConnecting || (_channel != null && _channel?.closeCode == null)) {
-      _log.warning(
-        '_startDiscovery: Chamada ignorada (isConnecting=$_isConnecting, channel=$_channel)',
-      );
+    if (_isConnecting || (_channel != null && _channel?.closeCode == null))
       return;
-    }
 
     // Atualiza UI para estado "Procurando"
     setState(() {
@@ -76,18 +85,15 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
     });
 
     try {
-      // Inicia a descoberta pelo tipo de serviço definido no Professor
       _discovery = await startDiscovery(
         '_smartpresence._tcp',
         autoResolve: false,
-      ); // autoResolve: false é geralmente mais estável
+      );
 
-      // Escuta por serviços encontrados
       _discovery!.addListener(() {
         if (_discovery != null &&
             _discovery!.services.isNotEmpty &&
             !_isConnecting) {
-          // Pega o primeiro serviço encontrado que corresponda ao nome esperado
           final service = _discovery!.services.firstWhere(
             (s) => s.name == 'smartpresence',
             orElse: () => Service(
@@ -95,23 +101,22 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
               type: '',
               host: '',
               port: 0,
-            ), // Serviço dummy se não encontrar
+            ), // Serviço dummy
           );
           if (service.name != 'NotFound') {
-            // 3. Substituir print() por _log.info()
             _log.info(
               "Serviço 'smartpresence' encontrado via NSD: ${service.host}:${service.port}",
             );
-            _resolveService(service); // Encontrou, tenta resolver e conectar
+            // ANTES de resolver, valida os campos
+            if (_validateStudentFields()) {
+              _resolveService(service); // Encontrou, tenta resolver e conectar
+            }
           }
         }
       });
-      // 3. Substituir print() por _log.info()
       _log.info("NSD Discovery iniciado para '_smartpresence._tcp'.");
-      // 3. Mudar catch(e) para catch(e, stackTrace)
-    } catch (e, stackTrace) {
-      // 3. Substituir print() por _log.severe()
-      _log.severe('Erro ao iniciar descoberta NSD.', e, stackTrace);
+    } catch (e, s) {
+      _log.severe('Erro ao iniciar descoberta NSD', e, s);
       if (!mounted) return;
       setState(() {
         _statusMessage =
@@ -127,33 +132,32 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
     if (_discovery != null) {
       try {
         await stopDiscovery(_discovery!);
-        // 3. Substituir print() por _log.fine() (log menos importante)
-        _log.fine("NSD Discovery parado.");
-        // 3. Mudar catch(e) para catch(e, stackTrace)
-      } catch (e, stackTrace) {
-        // 3. Substituir print() por _log.warning() (não é um erro crítico)
+        _log.info("NSD Discovery parado.");
+      } catch (e, s) {
         _log.warning(
-          "Erro ao parar NSD Discovery (pode ser normal se já parado).",
+          "Erro ao parar NSD Discovery (pode ser normal se já parado)",
           e,
-          stackTrace,
+          s,
         );
       }
       _discovery = null;
     }
   }
 
-  // 2. Resolve o serviço (obtém IP e Porta) - Necessário se autoResolve=false
+  // 2. Resolve o serviço (obtém IP e Porta)
   Future<void> _resolveService(Service service) async {
     // Trava para evitar múltiplas conexões
-    if (_isConnecting) {
-      _log.warning('resolveService: Chamada ignorada (isConnecting=true)');
+    if (_isConnecting) return;
+
+    // Valida novamente (segurança)
+    if (!_validateStudentFields()) {
+      _isConnecting = false;
       return;
     }
     _isConnecting = true;
 
     await _stopDiscovery(); // Para de procurar outros
 
-    _log.info('Resolvendo serviço: ${service.name}...');
     setState(() {
       _statusMessage =
           'Sala encontrada (${service.name})! Resolvendo endereço...';
@@ -166,7 +170,6 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
         service,
       ); // Resolve o serviço para obter IP/Host
       if (resolved.host != null) {
-        // 3. Substituir print() por _log.info()
         _log.info(
           'Serviço resolvido: Host: ${resolved.host}, Porta: ${resolved.port}',
         );
@@ -177,10 +180,8 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
       } else {
         throw Exception('Endereço (host) não encontrado para o serviço.');
       }
-      // 3. Mudar catch(e) para catch(e, stackTrace)
-    } catch (e, stackTrace) {
-      // 3. Substituir print() por _log.severe()
-      _log.severe('Erro ao resolver serviço NSD.', e, stackTrace);
+    } catch (e, s) {
+      _log.severe('Erro ao resolver serviço NSD', e, s);
       if (!mounted) return;
       setState(() {
         _statusMessage = 'Falha ao obter detalhes da sala. Tente novamente.';
@@ -188,18 +189,20 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
         _statusColor = Colors.red;
         _isConnecting = false; // Libera trava
       });
-      // Opcional: Reiniciar descoberta automaticamente após um tempo
-      // Future.delayed(const Duration(seconds: 5), () => _startDiscovery());
     }
   }
 
   // 3. Conecta ao WebSocket do professor (IP e Porta fornecidos)
   void _connectToWebSocket(String host, int port) {
+    // Valida os campos ANTES de conectar
+    if (!_validateStudentFields()) {
+      _isConnecting = false;
+      return;
+    }
+
     final wsUrl = 'ws://$host:$port';
-    // 3. Substituir print() por _log.info()
     _log.info('Tentando conectar via WebSocket a: $wsUrl');
 
-    // Atualiza UI para estado "Conectando"
     setState(() {
       _statusMessage = 'Conectando ao professor em $host...';
       _statusIcon = Icons.power_settings_new_rounded; // Ícone de conectar
@@ -207,15 +210,12 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
     });
 
     try {
-      // Cria o canal de comunicação WebSocket
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
 
-      // Espera a conexão ser estabelecida (.ready)
       _channel!.ready
           .then((_) {
-            if (!mounted) return; // Se a tela foi fechada antes de conectar
+            if (!mounted) return;
 
-            // 3. Substituir print() por _log.info()
             _log.info("Conexão WebSocket estabelecida com sucesso.");
             setState(() {
               _statusMessage = 'Conectado! Entrando na sala...';
@@ -223,36 +223,28 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
               _statusColor = Colors.green;
             });
 
-            // Pequeno atraso antes de navegar para a próxima tela
-            // Permite que a UI atualize e evita potenciais race conditions
             Future.delayed(const Duration(milliseconds: 300), () {
               if (mounted && _channel != null) {
-                _log.info(
-                  'Navegando para AlunoWaitScreen com nome: $_nomeAluno',
-                );
+                // Pega os dados dos controllers
+                final nome = _nomeController.text.trim();
+                final matricula = _matriculaController.text.trim();
+
                 Navigator.pushReplacement(
-                  // Substitui a tela atual pela de espera
                   context,
                   MaterialPageRoute(
-                    // Passa o canal WebSocket e o nome do aluno para a próxima tela
+                    // Passa o canal, nome e matrícula para a próxima tela
                     builder: (context) => AlunoWaitScreen(
                       channel: _channel!,
-                      nomeAluno: _nomeAluno,
+                      nomeAluno: nome,
+                      matriculaAluno: matricula, // NOVO
                     ),
                   ),
                 );
               }
             });
-            // 3. Mudar .catchError((e) para .catchError((e, stackTrace)
           })
-          .catchError((e, stackTrace) {
-            // Erro durante o handshake/conexão WebSocket
-            // 3. Substituir print() por _log.severe()
-            _log.severe(
-              'Erro durante conexão WebSocket (.ready).',
-              e,
-              stackTrace,
-            );
+          .catchError((e, s) {
+            _log.severe('Erro durante conexão WebSocket (.ready)', e, s);
             if (!mounted) return;
             setState(() {
               _statusMessage =
@@ -263,11 +255,8 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
             });
             _channel = null; // Limpa o canal
           });
-      // 3. Mudar catch(e) para catch(e, stackTrace)
-    } catch (e, stackTrace) {
-      // Erro ao tentar criar o WebSocketChannel (ex: URL inválida)
-      // 3. Substituir print() por _log.severe()
-      _log.severe('Erro ao iniciar WebSocketChannel.connect.', e, stackTrace);
+    } catch (e, s) {
+      _log.severe('Erro ao iniciar WebSocketChannel.connect', e, s);
       if (!mounted) return;
       setState(() {
         _statusMessage = 'Endereço inválido ou erro inesperado.';
@@ -281,18 +270,18 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
 
   // --- Diálogo para Inserção Manual de IP ---
   Future<void> _showManualIPDialog() async {
-    _log.info('Abrindo diálogo de IP manual.');
+    // Valida Nome e Matrícula ANTES de abrir o diálogo de IP
+    if (!_validateStudentFields()) return;
+
     await _stopDiscovery(); // Para a busca automática
     _ipController.text = ""; // Limpa campo
     _isConnecting = true; // Ativa trava para conexão manual
 
-    // Mostra o AlertDialog
     final String? ipPort = await showDialog<String>(
       context: context,
-      barrierDismissible: false, // Não fecha ao clicar fora
+      barrierDismissible: false,
       builder: (context) {
-        String? errorText; // Para validação
-        // Usa StatefulWidget interno para validar o campo em tempo real
+        String? errorText;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
@@ -302,9 +291,9 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                 decoration: InputDecoration(
                   hintText: 'Ex: 192.168.1.5:45678',
                   labelText: 'IP:Porta do Professor',
-                  errorText: errorText, // Mostra erro de validação
+                  errorText: errorText,
                 ),
-                keyboardType: TextInputType.url, // Teclado com ':' e '.'
+                keyboardType: TextInputType.url,
                 autofocus: true,
               ),
               actions: [
@@ -317,7 +306,6 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                 ElevatedButton(
                   onPressed: () {
                     final text = _ipController.text.trim();
-                    // Validação simples
                     if (text.isEmpty || !text.contains(':')) {
                       setDialogState(
                         () => errorText = 'Formato inválido (ex: IP:PORTA)',
@@ -331,10 +319,8 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                           parts[1].isEmpty)
                         throw FormatException();
                       int.parse(parts[1]); // Tenta converter porta para int
-                      // Se passou, fecha o diálogo retornando o texto
                       Navigator.of(context).pop(text);
                     } catch (e) {
-                      _log.warning('Entrada manual de IP/Porta inválida.', e);
                       setDialogState(() => errorText = 'IP ou Porta inválido');
                     }
                   },
@@ -347,21 +333,14 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
       },
     );
 
-    // Se o usuário digitou algo e clicou em Conectar
     if (ipPort != null && ipPort.isNotEmpty) {
       try {
         final parts = ipPort.split(':');
         final host = parts[0];
         final port = int.parse(parts[1]);
-        _log.info('Tentando conexão manual com $host:$port');
         _connectToWebSocket(host, port); // Tenta conectar com os dados manuais
-      } catch (e, stackTrace) {
-        // Se o formato ainda estiver errado (improvável devido à validação no diálogo)
-        _log.severe(
-          'Erro ao processar IP:PORTA manual: $ipPort',
-          e,
-          stackTrace,
-        );
+      } catch (e, s) {
+        _log.severe("Erro ao processar IP manual", e, s);
         if (mounted) {
           setState(() {
             _statusMessage = 'Formato de IP:PORTA inválido.';
@@ -373,7 +352,6 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
       }
     } else {
       // Se o usuário cancelou o diálogo, reinicia a descoberta automática
-      _log.info('Conexão manual cancelada, reiniciando descoberta.');
       _isConnecting = false; // Libera trava
       _startDiscovery();
     }
@@ -384,61 +362,111 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Entrar na Sala')),
-      body: Center(
+      body: SingleChildScrollView(
+        // Permite rolagem se o teclado aparecer
         child: Padding(
           padding: const EdgeInsets.all(24.0), // Padding geral
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Ícone de Status
-              Icon(_statusIcon, size: 80, color: _statusColor),
-              const SizedBox(height: 32),
-
-              // Mensagem de Status
-              Text(
-                _statusMessage,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: _statusColor,
-                ),
-              ),
-              const SizedBox(height: 40),
-
-              // Indicador de Progresso (se procurando ou conectando)
-              if (_statusIcon == Icons.wifi_tethering ||
-                  _statusIcon == Icons.network_check_rounded ||
-                  _statusIcon == Icons.power_settings_new_rounded)
-                const CircularProgressIndicator(),
-
-              // Botão Tentar Novamente (se ocorreu erro)
-              if (_statusIcon == Icons.error_outline_rounded)
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('Tentar Descoberta Novamente'),
-                  onPressed: _startDiscovery, // Reinicia a busca automática
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
+          child: Form(
+            // Adiciona o Form para validação
+            key: _formKey,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 24),
+                // --- NOVOS CAMPOS DE TEXTO ---
+                TextFormField(
+                  controller: _nomeController,
+                  decoration: InputDecoration(
+                    labelText: 'Nome Completo',
+                    hintText: 'Seu nome',
+                    icon: Icon(Icons.person),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Por favor, insira seu nome.';
+                    }
+                    return null;
+                  },
                 ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _matriculaController,
+                  decoration: InputDecoration(
+                    labelText: 'Matrícula',
+                    hintText: 'Sua matrícula (ID)',
+                    icon: Icon(Icons.badge),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  keyboardType: TextInputType.number, // Teclado numérico
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Por favor, insira sua matrícula.';
+                    }
+                    // Opcional: Adicionar validação de formato/tamanho da matrícula
+                    return null;
+                  },
+                ),
+                // --- FIM DOS NOVOS CAMPOS ---
+                const SizedBox(height: 48),
 
-              const SizedBox(height: 20), // Espaço antes do botão manual
-              // Botão para Conexão Manual (Plano B)
-              // Mostra apenas se não estiver já conectado com sucesso
-              if (_statusIcon != Icons.check_circle_outline_rounded)
-                TextButton(
-                  onPressed: _showManualIPDialog, // Abre o diálogo
-                  child: const Text(
-                    'Não está encontrando? Tentar conexão manual por IP',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 15),
+                // Ícone de Status
+                Icon(_statusIcon, size: 80, color: _statusColor),
+                const SizedBox(height: 32),
+
+                // Mensagem de Status
+                Text(
+                  _statusMessage,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: _statusColor,
                   ),
                 ),
-            ],
+                const SizedBox(height: 40),
+
+                // Indicador de Progresso (se procurando ou conectando)
+                if (_isConnecting ||
+                    _statusIcon == Icons.wifi_tethering ||
+                    _statusIcon == Icons.network_check_rounded ||
+                    _statusIcon == Icons.power_settings_new_rounded)
+                  const CircularProgressIndicator(),
+
+                // Botão Tentar Novamente (se ocorreu erro)
+                if (_statusIcon == Icons.error_outline_rounded &&
+                    !_isConnecting)
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Tentar Descoberta Novamente'),
+                    onPressed: _startDiscovery, // Reinicia a busca automática
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+
+                const SizedBox(height: 20), // Espaço antes do botão manual
+                // Botão para Conexão Manual (Plano B)
+                if (_statusIcon != Icons.check_circle_outline_rounded)
+                  TextButton(
+                    // Desabilita o botão se já estiver conectando
+                    onPressed: _isConnecting ? null : _showManualIPDialog,
+                    child: const Text(
+                      'Não está encontrando? Tentar conexão manual por IP',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 15),
+                    ),
+                  ),
+                const SizedBox(height: 24),
+              ],
+            ),
           ),
         ),
       ),

@@ -2,20 +2,23 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Para input formatters
-import 'package:logging/logging.dart'; // 1. Importar o logging
+import 'package:logging/logging.dart'; // Para logging
 import 'package:web_socket_channel/web_socket_channel.dart'; // Para WebSocket
 
-// 2. Criar a instância do Logger
 final _log = Logger('AlunoWaitScreen');
 
 class AlunoWaitScreen extends StatefulWidget {
   final WebSocketChannel channel; // Canal de comunicação recebido
   final String nomeAluno; // Nome do aluno recebido
+  // --- CAMPO ADICIONADO ---
+  final String matriculaAluno; // MATRÍCULA DO ALUNO
 
   const AlunoWaitScreen({
     super.key,
     required this.channel,
     required this.nomeAluno,
+    // --- PARÂMETRO ADICIONADO ---
+    required this.matriculaAluno,
   });
 
   @override
@@ -39,18 +42,19 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     _listenToServer(); // Começa a escutar por mensagens do servidor
 
     // Envia a mensagem JOIN para se identificar ao servidor
-    final joinMessage = {'command': 'JOIN', 'nome': widget.nomeAluno};
-    widget.channel.sink.add(jsonEncode(joinMessage));
+    // AGORA INCLUI A MATRÍCULA
+    final joinMessage = jsonEncode({
+      'command': 'JOIN',
+      'nome': widget.nomeAluno,
+      'matricula': widget.matriculaAluno, // USA A MATRÍCULA RECEBIDA
+    });
 
-    // 3. Substituir 'print' por 'log'
-    _log.info(
-      'Mensagem JOIN enviada para o servidor com nome: ${widget.nomeAluno}.',
-    );
+    widget.channel.sink.add(joinMessage);
+    _log.info('Mensagem JOIN enviada para o servidor: $joinMessage');
   }
 
   @override
   void dispose() {
-    _log.info('Tela de espera (AlunoWaitScreen) sendo fechada (dispose).');
     _isDisposed = true; // Marca como disposed
     _subscription?.cancel(); // Cancela a escuta do stream
     // O fechamento do channel.sink é feito no onDone/onError do listener
@@ -66,7 +70,6 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       (message) {
         if (_isDisposed) return; // Se a tela foi fechada, não faz nada
 
-        // 3. Usar nível 'fine' para logs de alta frequência
         _log.fine("Mensagem recebida do professor: $message");
         try {
           // Decodifica a mensagem JSON
@@ -79,7 +82,6 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
               case 'JOIN_SUCCESS': // Servidor confirmou a entrada
                 _statusMessage =
                     "Você está na sala! Aguardando início das rodadas...";
-                _log.info('Aluno ${widget.nomeAluno} entrou na sala.');
                 break;
               case 'RODADA_ABERTA': // Servidor iniciou uma rodada
                 _statusMessage =
@@ -88,23 +90,18 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                     data['nome'] ?? ''; // Guarda o nome da rodada
                 _showPinInput = true; // Mostra o campo para digitar o PIN
                 _pinController.clear(); // Limpa campo anterior
-                _log.info('Rodada aberta pelo servidor: $_currentRodadaName');
                 break;
               case 'RODADA_FECHADA': // Servidor encerrou a rodada
                 _statusMessage =
                     'A ${data['nome'] ?? 'rodada'} foi encerrada. Aguardando a próxima...';
                 _showPinInput = false; // Esconde o campo de PIN
                 _pinController.clear(); // Limpa o campo
-                _log.info('Rodada fechada pelo servidor: ${data['nome']}');
                 break;
               case 'PRESENCA_OK': // Servidor confirmou o PIN
                 _statusMessage =
                     'Presença confirmada para a ${data['rodada']}!';
                 _showPinInput = false; // Esconde o campo de PIN
                 _pinController.clear();
-                _log.info(
-                  'Presença OK para ${widget.nomeAluno} na ${data['rodada']}',
-                );
                 // Mostra um feedback rápido de sucesso
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -116,12 +113,9 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                   );
                 }
                 break;
-              case 'PRESENCA_FALHA': // Servidor indicou PIN errado
+              case 'PRESENCA_FALHA': // Servidor indicou PIN errado ou falha
                 _statusMessage =
                     data['message'] ?? 'PIN incorreto. Tente novamente.';
-                _log.warning(
-                  'Falha no PIN para ${widget.nomeAluno} na $_currentRodadaName',
-                );
                 // Mostra um feedback rápido de erro
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -139,62 +133,46 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                 _statusMessage =
                     data['message'] ?? 'Ocorreu um erro no servidor.';
                 _showPinInput = false;
-                // 3. Usar nível 'severe' para erros
-                _log.severe('Erro recebido do servidor: $_statusMessage');
+                _log.warning('Erro recebido do servidor: $_statusMessage');
                 break;
               default:
-                // 3. Usar nível 'warning' para comandos inesperados
                 _log.warning(
                   "Comando desconhecido recebido do servidor: $command",
                 );
             }
           });
-        } catch (e, stackTrace) {
-          // 3. Usar nível 'severe' para erros de parsing
-          _log.severe(
-            "Erro ao processar mensagem JSON do servidor: $message",
-            e,
-            stackTrace,
-          );
-          // Opcional: Mostrar erro genérico na UI
-          // setState(() => _statusMessage = 'Erro ao receber dados do servidor.');
+        } catch (e, s) {
+          _log.severe("Erro ao processar mensagem JSON do servidor", e, s);
         }
       },
       onDone: () {
         // Conexão fechada pelo servidor
         if (_isDisposed) return;
         _log.info("Conexão WebSocket fechada pelo servidor (onDone).");
-        setState(() {
-          _statusMessage = 'Desconectado pelo professor. Você pode voltar.';
-          _showPinInput = false;
-        });
-        widget.channel.sink.close(); // Fecha o lado do cliente
-
-        // *** ALTERAÇÃO SOLICITADA ***
-        // Volta para a tela anterior automaticamente
         if (mounted) {
-          _log.info('Conexão fechada. Navegando de volta (pop)...');
+          setState(() {
+            _statusMessage = 'Desconectado pelo professor. Você pode voltar.';
+            _showPinInput = false;
+          });
+          // Volta automaticamente para a tela anterior
           Navigator.of(context).pop();
         }
+        widget.channel.sink.close(); // Fecha o lado do cliente
       },
-      onError: (error, stackTrace) {
+      onError: (error, s) {
         // Erro na conexão WebSocket
         if (_isDisposed) return;
-        // 3. Usar 'severe' e passar o erro e stackTrace
-        _log.severe('Erro na conexão WebSocket (onError)', error, stackTrace);
-        setState(() {
-          _statusMessage =
-              'Erro de conexão com o servidor. Tente entrar novamente.';
-          _showPinInput = false;
-        });
-        widget.channel.sink.close(); // Fecha o lado do cliente
-
-        // *** ALTERAÇÃO SOLICITADA ***
-        // Volta para a tela anterior automaticamente
+        _log.severe('Erro na conexão WebSocket (onError)', error, s);
         if (mounted) {
-          _log.info('Erro na conexão. Navegando de volta (pop)...');
+          setState(() {
+            _statusMessage =
+                'Erro de conexão com o servidor. Tente entrar novamente.';
+            _showPinInput = false;
+          });
+          // Volta automaticamente para a tela anterior
           Navigator.of(context).pop();
         }
+        widget.channel.sink.close(); // Fecha o lado do cliente
       },
       cancelOnError: true, // Cancela a subscrição se ocorrer um erro
     );
@@ -213,6 +191,8 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
           'command': 'SUBMIT_PIN',
           'rodada': _currentRodadaName, // Nome da rodada atual
           'pin': pin, // PIN digitado
+          // A matrícula/nome não precisam ser enviados aqui,
+          // pois o servidor já associou este 'socket' a um aluno
         }),
       );
       // Atualiza UI para indicar que está verificando
@@ -222,7 +202,6 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       });
     } else {
       // Mostra erro se o PIN não tiver 4 dígitos
-      _log.warning('Tentativa de submeter PIN inválido (tamanho != 4): $pin');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('O PIN deve ter exatamente 4 dígitos.'),
@@ -236,38 +215,30 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
   @override
   Widget build(BuildContext context) {
     // WillPopScope impede o usuário de voltar usando o botão físico/gesto
-    // Força o aluno a permanecer na sala até ser desconectado.
     return WillPopScope(
-      onWillPop: () async {
-        _log.warning('Tentativa de voltar (onWillPop) bloqueada.');
-        return false; // Retorna false para impedir o "voltar"
-      },
+      onWillPop: () async => false, // Retorna false para impedir o "voltar"
       child: Scaffold(
         appBar: AppBar(
-          // Título muda se precisar digitar o PIN
           title: Text(
             _showPinInput ? 'Registre sua Presença!' : 'Sala de Espera',
           ),
-          // Remove o botão de voltar padrão da AppBar
           automaticallyImplyLeading: false,
-
-          // --- ATUALIZAÇÃO VISUAL (Sugestão 4) ---
+          // UI ATUALIZADA (SUGESTÃO ANTERIOR)
           backgroundColor: Theme.of(context).primaryColor, // Cor do fundo
           foregroundColor: Colors.white, // Cor do título e ícones
           elevation: 0, // Sem sombra, para integrar
-          // ------------------------------------
         ),
         // Fundo na cor primária do tema
         backgroundColor: Theme.of(context).primaryColor,
         body: Center(
-          // AnimatedSwitcher faz a transição suave entre a UI de espera e a de input do PIN
+          // AnimatedSwitcher faz a transição suave
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 300), // Duração da animação
             transitionBuilder: (Widget child, Animation<double> animation) {
-              // Animação de Fade (aparecer/desaparecer suave)
+              // Animação de Fade
               return FadeTransition(opacity: animation, child: child);
             },
-            // Decide qual UI mostrar baseado no estado _showPinInput
+            // Decide qual UI mostrar
             child: _showPinInput
                 ? _buildPinInputView(context) // Mostra campo de PIN
                 : _buildWaitingView(context), // Mostra indicador de espera
@@ -376,8 +347,6 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                 vertical: 20,
               ), // Padding vertical
             ),
-            // Opcional: Submeter ao pressionar Enter/Done no teclado
-            // onSubmitted: (_) => _submitPin(),
           ),
           const SizedBox(height: 24),
           // Botão de Enviar Presença
