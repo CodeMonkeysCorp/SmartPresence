@@ -1,10 +1,13 @@
-// lib/screens/aluno_join_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:logging/logging.dart'; // 1. Importar o logging
 import 'package:nsd/nsd.dart'; // Pacote de descoberta NSD
 import 'package:web_socket_channel/web_socket_channel.dart'; // Pacote WebSocket
 import 'aluno_wait_screen.dart'; // Tela seguinte
+
+// 2. Criar a instância do Logger
+final _log = Logger('AlunoJoinScreen');
 
 class AlunoJoinScreen extends StatefulWidget {
   const AlunoJoinScreen({super.key});
@@ -34,6 +37,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
   @override
   void initState() {
     super.initState();
+    _log.info('initState: Iniciando descoberta após 500ms.');
     // Atraso inicial para a UI carregar antes de iniciar a descoberta
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
@@ -45,6 +49,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
 
   @override
   void dispose() {
+    _log.info('dispose: Parando descoberta e fechando conexões.');
     _stopDiscovery(); // Garante que a descoberta pare ao sair
     _channel?.sink.close(); // Fecha o canal WebSocket se estiver aberto
     _ipController.dispose(); // Limpa o controller do TextField
@@ -56,8 +61,12 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
   // 1. Inicia a procura (NSD) pelo serviço do professor
   Future<void> _startDiscovery() async {
     // Não inicia se já estiver tentando conectar ou já conectado
-    if (_isConnecting || (_channel != null && _channel?.closeCode == null))
+    if (_isConnecting || (_channel != null && _channel?.closeCode == null)) {
+      _log.warning(
+        '_startDiscovery: Chamada ignorada (isConnecting=$_isConnecting, channel=$_channel)',
+      );
       return;
+    }
 
     // Atualiza UI para estado "Procurando"
     setState(() {
@@ -89,16 +98,20 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
             ), // Serviço dummy se não encontrar
           );
           if (service.name != 'NotFound') {
-            print(
+            // 3. Substituir print() por _log.info()
+            _log.info(
               "Serviço 'smartpresence' encontrado via NSD: ${service.host}:${service.port}",
             );
             _resolveService(service); // Encontrou, tenta resolver e conectar
           }
         }
       });
-      print("NSD Discovery iniciado para '_smartpresence._tcp'.");
-    } catch (e) {
-      print('Erro ao iniciar descoberta NSD: $e');
+      // 3. Substituir print() por _log.info()
+      _log.info("NSD Discovery iniciado para '_smartpresence._tcp'.");
+      // 3. Mudar catch(e) para catch(e, stackTrace)
+    } catch (e, stackTrace) {
+      // 3. Substituir print() por _log.severe()
+      _log.severe('Erro ao iniciar descoberta NSD.', e, stackTrace);
       if (!mounted) return;
       setState(() {
         _statusMessage =
@@ -114,9 +127,16 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
     if (_discovery != null) {
       try {
         await stopDiscovery(_discovery!);
-        print("NSD Discovery parado.");
-      } catch (e) {
-        print("Erro ao parar NSD Discovery (pode ser normal se já parado): $e");
+        // 3. Substituir print() por _log.fine() (log menos importante)
+        _log.fine("NSD Discovery parado.");
+        // 3. Mudar catch(e) para catch(e, stackTrace)
+      } catch (e, stackTrace) {
+        // 3. Substituir print() por _log.warning() (não é um erro crítico)
+        _log.warning(
+          "Erro ao parar NSD Discovery (pode ser normal se já parado).",
+          e,
+          stackTrace,
+        );
       }
       _discovery = null;
     }
@@ -125,11 +145,15 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
   // 2. Resolve o serviço (obtém IP e Porta) - Necessário se autoResolve=false
   Future<void> _resolveService(Service service) async {
     // Trava para evitar múltiplas conexões
-    if (_isConnecting) return;
+    if (_isConnecting) {
+      _log.warning('resolveService: Chamada ignorada (isConnecting=true)');
+      return;
+    }
     _isConnecting = true;
 
     await _stopDiscovery(); // Para de procurar outros
 
+    _log.info('Resolvendo serviço: ${service.name}...');
     setState(() {
       _statusMessage =
           'Sala encontrada (${service.name})! Resolvendo endereço...';
@@ -142,7 +166,8 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
         service,
       ); // Resolve o serviço para obter IP/Host
       if (resolved.host != null) {
-        print(
+        // 3. Substituir print() por _log.info()
+        _log.info(
           'Serviço resolvido: Host: ${resolved.host}, Porta: ${resolved.port}',
         );
         _connectToWebSocket(
@@ -152,8 +177,10 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
       } else {
         throw Exception('Endereço (host) não encontrado para o serviço.');
       }
-    } catch (e) {
-      print('Erro ao resolver serviço NSD: $e');
+      // 3. Mudar catch(e) para catch(e, stackTrace)
+    } catch (e, stackTrace) {
+      // 3. Substituir print() por _log.severe()
+      _log.severe('Erro ao resolver serviço NSD.', e, stackTrace);
       if (!mounted) return;
       setState(() {
         _statusMessage = 'Falha ao obter detalhes da sala. Tente novamente.';
@@ -169,7 +196,8 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
   // 3. Conecta ao WebSocket do professor (IP e Porta fornecidos)
   void _connectToWebSocket(String host, int port) {
     final wsUrl = 'ws://$host:$port';
-    print('Tentando conectar via WebSocket a: $wsUrl');
+    // 3. Substituir print() por _log.info()
+    _log.info('Tentando conectar via WebSocket a: $wsUrl');
 
     // Atualiza UI para estado "Conectando"
     setState(() {
@@ -187,7 +215,8 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
           .then((_) {
             if (!mounted) return; // Se a tela foi fechada antes de conectar
 
-            print("Conexão WebSocket estabelecida com sucesso.");
+            // 3. Substituir print() por _log.info()
+            _log.info("Conexão WebSocket estabelecida com sucesso.");
             setState(() {
               _statusMessage = 'Conectado! Entrando na sala...';
               _statusIcon = Icons.check_circle_outline_rounded;
@@ -198,6 +227,9 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
             // Permite que a UI atualize e evita potenciais race conditions
             Future.delayed(const Duration(milliseconds: 300), () {
               if (mounted && _channel != null) {
+                _log.info(
+                  'Navegando para AlunoWaitScreen com nome: $_nomeAluno',
+                );
                 Navigator.pushReplacement(
                   // Substitui a tela atual pela de espera
                   context,
@@ -211,10 +243,16 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                 );
               }
             });
+            // 3. Mudar .catchError((e) para .catchError((e, stackTrace)
           })
-          .catchError((e) {
+          .catchError((e, stackTrace) {
             // Erro durante o handshake/conexão WebSocket
-            print('Erro durante conexão WebSocket (.ready): $e');
+            // 3. Substituir print() por _log.severe()
+            _log.severe(
+              'Erro durante conexão WebSocket (.ready).',
+              e,
+              stackTrace,
+            );
             if (!mounted) return;
             setState(() {
               _statusMessage =
@@ -225,9 +263,11 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
             });
             _channel = null; // Limpa o canal
           });
-    } catch (e) {
+      // 3. Mudar catch(e) para catch(e, stackTrace)
+    } catch (e, stackTrace) {
       // Erro ao tentar criar o WebSocketChannel (ex: URL inválida)
-      print('Erro ao iniciar WebSocketChannel.connect: $e');
+      // 3. Substituir print() por _log.severe()
+      _log.severe('Erro ao iniciar WebSocketChannel.connect.', e, stackTrace);
       if (!mounted) return;
       setState(() {
         _statusMessage = 'Endereço inválido ou erro inesperado.';
@@ -241,6 +281,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
 
   // --- Diálogo para Inserção Manual de IP ---
   Future<void> _showManualIPDialog() async {
+    _log.info('Abrindo diálogo de IP manual.');
     await _stopDiscovery(); // Para a busca automática
     _ipController.text = ""; // Limpa campo
     _isConnecting = true; // Ativa trava para conexão manual
@@ -293,6 +334,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                       // Se passou, fecha o diálogo retornando o texto
                       Navigator.of(context).pop(text);
                     } catch (e) {
+                      _log.warning('Entrada manual de IP/Porta inválida.', e);
                       setDialogState(() => errorText = 'IP ou Porta inválido');
                     }
                   },
@@ -311,9 +353,15 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
         final parts = ipPort.split(':');
         final host = parts[0];
         final port = int.parse(parts[1]);
+        _log.info('Tentando conexão manual com $host:$port');
         _connectToWebSocket(host, port); // Tenta conectar com os dados manuais
-      } catch (e) {
+      } catch (e, stackTrace) {
         // Se o formato ainda estiver errado (improvável devido à validação no diálogo)
+        _log.severe(
+          'Erro ao processar IP:PORTA manual: $ipPort',
+          e,
+          stackTrace,
+        );
         if (mounted) {
           setState(() {
             _statusMessage = 'Formato de IP:PORTA inválido.';
@@ -325,6 +373,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
       }
     } else {
       // Se o usuário cancelou o diálogo, reinicia a descoberta automática
+      _log.info('Conexão manual cancelada, reiniciando descoberta.');
       _isConnecting = false; // Libera trava
       _startDiscovery();
     }

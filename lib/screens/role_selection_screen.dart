@@ -1,15 +1,21 @@
-// lib/screens/role_selection_screen.dart
 import 'package:flutter/material.dart';
+import 'package:logging/logging.dart'; // 1. Importar o logging
+
 // Importa as telas que serão navegadas
 import 'aluno_join_screen.dart';
 import 'configuracoes_screen.dart';
 import 'professor_host_screen.dart';
+
+// 2. Criar a instância do Logger
+final _log = Logger('RoleSelectionScreen');
 
 class RoleSelectionScreen extends StatelessWidget {
   const RoleSelectionScreen({super.key});
 
   // Função para navegar para a tela do Professor
   void _navigateToProfessorHost(BuildContext context) {
+    // 3. Adicionar log de navegação
+    _log.info('Navegando para ProfessorHostScreen');
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ProfessorHostScreen()),
@@ -18,6 +24,8 @@ class RoleSelectionScreen extends StatelessWidget {
 
   // Função para navegar para a tela do Aluno
   void _navigateToAlunoJoin(BuildContext context) {
+    // 3. Adicionar log de navegação
+    _log.info('Navegando para AlunoJoinScreen');
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const AlunoJoinScreen()),
@@ -26,6 +34,8 @@ class RoleSelectionScreen extends StatelessWidget {
 
   // Função para navegar para a tela de Configurações
   void _navigateToConfiguracoes(BuildContext context) {
+    // 3. Adicionar log de navegação
+    _log.info('Navegando para ConfiguracoesScreen');
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ConfiguracoesScreen()),

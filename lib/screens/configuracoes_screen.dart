@@ -1,6 +1,9 @@
-// lib/screens/configuracoes_screen.dart
 import 'package:flutter/material.dart';
+import 'package:logging/logging.dart'; // 1. Importar o logging
 import 'package:shared_preferences/shared_preferences.dart';
+
+// 2. Criar a instância do Logger
+final _log = Logger('ConfiguracoesScreen');
 
 class ConfiguracoesScreen extends StatefulWidget {
   const ConfiguracoesScreen({super.key});
@@ -27,12 +30,14 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
   @override
   void initState() {
     super.initState();
+    _log.info('initState: Carregando horários...');
     _loadHorarios();
   }
 
   // Carrega os horários salvos do SharedPreferences
   Future<void> _loadHorarios() async {
     final prefs = await SharedPreferences.getInstance();
+    _log.fine('Instância do SharedPreferences obtida.');
     // Usa setState para atualizar a UI após carregar
     setState(() {
       // Usa as chaves da classe pública e o helper _timeFromPrefs
@@ -43,10 +48,12 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
       _r4 = _timeFromPrefs(prefs.getString(ConfiguracoesScreen.R4_KEY)) ?? _r4;
       _isLoading = false; // Indica que o carregamento terminou
     });
+    _log.info('Horários carregados: R1=$_r1, R2=$_r2, R3=$_r3, R4=$_r4');
   }
 
   // Salva todos os horários no SharedPreferences
   Future<void> _saveHorarios() async {
+    _log.info('Salvando horários: R1=$_r1, R2=$_r2, R3=$_r3, R4=$_r4');
     final prefs = await SharedPreferences.getInstance();
     // Usa as chaves da classe pública e o helper _timeToString
     await prefs.setString(ConfiguracoesScreen.R1_KEY, _timeToString(_r1));
@@ -55,7 +62,12 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
     await prefs.setString(ConfiguracoesScreen.R4_KEY, _timeToString(_r4));
 
     // Verifica se o widget ainda está montado antes de usar o context
-    if (!mounted) return;
+    if (!mounted) {
+      _log.warning(
+        '_saveHorarios: Widget desmontado antes de exibir SnackBar ou navegar.',
+      );
+      return;
+    }
     // Mostra feedback para o usuário
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -73,6 +85,7 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
     TimeOfDay initialTime,
     ValueChanged<TimeOfDay> onTimeChanged,
   ) async {
+    _log.fine('Abrindo seletor de horário. Valor inicial: $initialTime');
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: initialTime,
@@ -99,9 +112,12 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
     );
     // Atualiza o estado se um novo horário foi selecionado
     if (picked != null && picked != initialTime) {
+      _log.info('Novo horário selecionado: $picked');
       setState(() {
         onTimeChanged(picked);
       });
+    } else {
+      _log.fine('Seletor de horário fechado sem alterações.');
     }
   }
 
@@ -114,14 +130,28 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
     if (prefsString == null) return null;
     try {
       final parts = prefsString.split(':');
-      if (parts.length != 2) return null; // Validação básica do formato
+      if (parts.length != 2) {
+        _log.warning(
+          'String de horário mal formatada (partes != 2): "$prefsString"',
+        );
+        return null;
+      }
       final hour = int.parse(parts[0]);
       final minute = int.parse(parts[1]);
       // Validação básica dos valores
-      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        _log.warning('String de horário com valores inválidos: "$prefsString"');
+        return null;
+      }
       return TimeOfDay(hour: hour, minute: minute);
-    } catch (e) {
-      print("Erro ao converter string '$prefsString' para TimeOfDay: $e");
+    } catch (e, stackTrace) {
+      // 3. SUBSTITUIÇÃO DO PRINT
+      // Em vez de print(), usamos _log.warning (ou .severe)
+      _log.warning(
+        "Erro ao converter string '$prefsString' para TimeOfDay.",
+        e, // Passa o objeto de exceção
+        stackTrace, // Passa o stack trace
+      );
       return null; // Retorna nulo se a string estiver mal formatada ou inválida
     }
   }

@@ -1,5 +1,8 @@
-// lib/screens/historico_screen.dart
 import 'package:flutter/material.dart';
+import 'package:logging/logging.dart'; // 1. Importar o logging
+
+// 2. Criar a instância do Logger
+final _log = Logger('HistoricoScreen');
 
 class HistoricoScreen extends StatelessWidget {
   // Recebe o mapa de presenças do ProfessorHostScreen
@@ -10,6 +13,11 @@ class HistoricoScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 3. Adicionar log de informação
+    _log.info(
+      'Construindo tela de histórico com ${presencas.length} registros de alunos.',
+    );
+
     // Cria a lista de Widgets a serem exibidos na ListView
     List<Widget> historicoWidgets = [];
 
@@ -148,7 +156,7 @@ class HistoricoScreen extends StatelessWidget {
       }
     }
 
-    // Retorna o Scaffold com a AppBar e a ListView contendo os widgets criados
+    // Retorna o Scaffold com la AppBar e a ListView contendo os widgets criados
     return Scaffold(
       appBar: AppBar(title: const Text('Histórico de Presença')),
       body: ListView(

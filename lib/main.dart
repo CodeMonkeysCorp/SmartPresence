@@ -1,4 +1,3 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Para travar orientação
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -8,7 +7,7 @@ import 'package:flutter/foundation.dart'; // Para kDebugMode
 import 'package:logging/logging.dart';
 
 Future<void> main() async {
-  // Garante que os bindings do Flutter foram inicializados antes de configurar orientação
+  // Garante que os bindings do Flutter foram inicializados
   WidgetsFlutterBinding.ensureInitialized();
 
   // Define as orientações preferidas (trava em modo retrato)
@@ -19,6 +18,11 @@ Future<void> main() async {
 
   // Define o locale padrão para pt_BR (afeta formatação de datas/horas)
   Intl.defaultLocale = 'pt_BR';
+
+  // *** ADICIONE ESTA LINHA ***
+  // Ativa o sistema de logging
+  setupLogging();
+
   runApp(const SmartPresenceApp());
 }
 
@@ -33,7 +37,7 @@ void setupLogging() {
     }
 
     // Em modo release (produção), você pode enviar logs de erro
-    // para um serviço como Firebase Crashlytics ou Sentry.
+    // para um serviço como Firebase Crashlyrics ou Sentry.
     if (kReleaseMode && record.level >= Level.SEVERE) {
       // myCrashReportingService.logError(record.message, record.stackTrace);
     }

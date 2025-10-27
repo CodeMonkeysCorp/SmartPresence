@@ -1,9 +1,12 @@
-// lib/screens/aluno_wait_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Para input formatters
+import 'package:logging/logging.dart'; // 1. Importar o logging
 import 'package:web_socket_channel/web_socket_channel.dart'; // Para WebSocket
+
+// 2. Criar a instância do Logger
+final _log = Logger('AlunoWaitScreen');
 
 class AlunoWaitScreen extends StatefulWidget {
   final WebSocketChannel channel; // Canal de comunicação recebido
@@ -36,16 +39,19 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     _listenToServer(); // Começa a escutar por mensagens do servidor
 
     // Envia a mensagem JOIN para se identificar ao servidor
-    widget.channel.sink.add(
-      jsonEncode({'command': 'JOIN', 'nome': widget.nomeAluno}),
-    );
-    print(
-      'Mensagem JOIN enviada para o servidor com nome: ${widget.nomeAluno}.',
-    );
+    final joinMessage = jsonEncode({
+      'command': 'JOIN',
+      'nome': widget.nomeAluno,
+    });
+    widget.channel.sink.add(joinMessage);
+
+    // 3. Substituir print() por _log.info()
+    _log.info('Mensagem JOIN enviada para o servidor: $joinMessage');
   }
 
   @override
   void dispose() {
+    _log.info('Dispose: Tela fechada, cancelando subscription.');
     _isDisposed = true; // Marca como disposed
     _subscription?.cancel(); // Cancela a escuta do stream
     // O fechamento do channel.sink é feito no onDone/onError do listener
@@ -61,7 +67,8 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       (message) {
         if (_isDisposed) return; // Se a tela foi fechada, não faz nada
 
-        print("Mensagem recebida do professor: $message");
+        // 3. Substituir print() por _log.fine() (para logs detalhados/frequentes)
+        _log.fine("Mensagem recebida do professor: $message");
         try {
           // Decodifica a mensagem JSON
           final data = jsonDecode(message);
@@ -73,6 +80,7 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
               case 'JOIN_SUCCESS': // Servidor confirmou a entrada
                 _statusMessage =
                     "Você está na sala! Aguardando início das rodadas...";
+                _log.info('Aluno ${widget.nomeAluno} entrou na sala.');
                 break;
               case 'RODADA_ABERTA': // Servidor iniciou uma rodada
                 _statusMessage =
@@ -81,18 +89,25 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                     data['nome'] ?? ''; // Guarda o nome da rodada
                 _showPinInput = true; // Mostra o campo para digitar o PIN
                 _pinController.clear(); // Limpa campo anterior
+                _log.info(
+                  'Rodada $_currentRodadaName aberta. Mostrando input de PIN.',
+                );
                 break;
               case 'RODADA_FECHADA': // Servidor encerrou a rodada
                 _statusMessage =
                     'A ${data['nome'] ?? 'rodada'} foi encerrada. Aguardando a próxima...';
                 _showPinInput = false; // Esconde o campo de PIN
                 _pinController.clear(); // Limpa o campo
+                _log.info('Rodada ${data['nome']} fechada.');
                 break;
               case 'PRESENCA_OK': // Servidor confirmou o PIN
                 _statusMessage =
                     'Presença confirmada para a ${data['rodada']}!';
                 _showPinInput = false; // Esconde o campo de PIN
                 _pinController.clear();
+                _log.info(
+                  'Presença OK para ${widget.nomeAluno} na ${data['rodada']}.',
+                );
                 // Mostra um feedback rápido de sucesso
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -107,6 +122,9 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
               case 'PRESENCA_FALHA': // Servidor indicou PIN errado
                 _statusMessage =
                     data['message'] ?? 'PIN incorreto. Tente novamente.';
+                _log.warning(
+                  'Presença FALHA para ${widget.nomeAluno}: $_statusMessage',
+                );
                 // Mostra um feedback rápido de erro
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -124,13 +142,23 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                 _statusMessage =
                     data['message'] ?? 'Ocorreu um erro no servidor.';
                 _showPinInput = false;
+                _log.severe('Erro recebido do servidor: $_statusMessage');
                 break;
               default:
-                print("Comando desconhecido recebido do servidor: $command");
+                // 3. Substituir print() por _log.warning() (para casos inesperados)
+                _log.warning(
+                  "Comando desconhecido recebido do servidor: $command",
+                );
             }
           });
-        } catch (e) {
-          print("Erro ao processar mensagem JSON do servidor: $e");
+          // 3. Substituir print() por _log.severe() (para erros)
+          // e mudar 'catch(e)' para 'catch(e, stackTrace)'
+        } catch (e, stackTrace) {
+          _log.severe(
+            "Erro ao processar mensagem JSON do servidor: $message",
+            e,
+            stackTrace,
+          );
           // Opcional: Mostrar erro genérico na UI
           // setState(() => _statusMessage = 'Erro ao receber dados do servidor.');
         }
@@ -138,7 +166,8 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       onDone: () {
         // Conexão fechada pelo servidor
         if (_isDisposed) return;
-        print("Conexão WebSocket fechada pelo servidor (onDone).");
+        // 3. Substituir print() por _log.info()
+        _log.info("Conexão WebSocket fechada pelo servidor (onDone).");
         setState(() {
           _statusMessage = 'Desconectado pelo professor. Você pode voltar.';
           _showPinInput = false;
@@ -146,10 +175,12 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
         });
         widget.channel.sink.close(); // Fecha o lado do cliente
       },
-      onError: (error) {
+      // 3. Mudar 'onError(error)' para 'onError(error, stackTrace)'
+      onError: (error, stackTrace) {
         // Erro na conexão WebSocket
         if (_isDisposed) return;
-        print('Erro na conexão WebSocket (onError): $error');
+        // 3. Substituir print() por _log.severe()
+        _log.severe('Erro na conexão WebSocket (onError).', error, stackTrace);
         setState(() {
           _statusMessage =
               'Erro de conexão com o servidor. Tente entrar novamente.';
@@ -160,7 +191,8 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       },
       cancelOnError: true, // Cancela a subscrição se ocorrer um erro
     );
-    print("AlunoWaitScreen: Iniciou a escuta por mensagens do servidor.");
+    // 3. Substituir print() por _log.info()
+    _log.info("Iniciou a escuta por mensagens do servidor.");
   }
 
   // Envia o PIN digitado para o servidor
@@ -168,7 +200,8 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     final pin = _pinController.text.trim();
     // Valida se o PIN tem 4 dígitos
     if (pin.length == 4) {
-      print("Enviando PIN $pin para a rodada $_currentRodadaName");
+      // 3. Substituir print() por _log.info()
+      _log.info("Enviando PIN $pin para a rodada $_currentRodadaName");
       // Envia o comando SUBMIT_PIN para o servidor
       widget.channel.sink.add(
         jsonEncode({
@@ -184,6 +217,7 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       });
     } else {
       // Mostra erro se o PIN não tiver 4 dígitos
+      _log.warning('Tentativa de enviar PIN inválido (tamanho != 4): $pin');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('O PIN deve ter exatamente 4 dígitos.'),
@@ -199,7 +233,10 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     // WillPopScope impede o usuário de voltar usando o botão físico/gesto
     // Força o aluno a permanecer na sala até ser desconectado.
     return WillPopScope(
-      onWillPop: () async => false, // Retorna false para impedir o "voltar"
+      onWillPop: () async {
+        _log.warning('Tentativa de voltar (onWillPop) bloqueada.');
+        return false; // Retorna false para impedir o "voltar"
+      },
       child: Scaffold(
         appBar: AppBar(
           // Título muda se precisar digitar o PIN

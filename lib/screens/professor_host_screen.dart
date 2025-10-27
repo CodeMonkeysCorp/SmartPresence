@@ -1,4 +1,3 @@
-// lib/screens/professor_host_screen.dart
 import 'dart:async';
 import 'dart:convert'; // Para JSON
 import 'dart:io';
@@ -11,6 +10,12 @@ import 'package:network_info_plus/network_info_plus.dart'; // Para descobrir o I
 import 'package:intl/intl.dart'; // Para formatar a data no CSV
 import 'configuracoes_screen.dart'; // Para as chaves de horário
 import 'historico_screen.dart'; // Para navegar para o histórico
+
+// 1. Importar o logging
+import 'package:logging/logging.dart';
+
+// 2. Criar a instância do Logger
+final _log = Logger('ProfessorHostScreen');
 
 // --- Modelos de Dados ---
 class AlunoConectado {
@@ -110,16 +115,18 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         _presencas = decodedMap.map(
           (key, value) => MapEntry(key, Map<String, String>.from(value as Map)),
         );
-        print(
+        _log.info(
           "Histórico de presenças carregado com ${decodedMap.length} alunos.",
         );
       } else {
-        print("Nenhum histórico de presenças encontrado ou está vazio.");
+        _log.info("Nenhum histórico de presenças encontrado ou está vazio.");
         _presencas = {}; // Inicia vazio
       }
-    } catch (e) {
-      print(
+    } catch (e, s) {
+      _log.warning(
         "Erro ao carregar presenças salvas: $e. Iniciando com histórico vazio.",
+        e,
+        s,
       );
       _presencas = {}; // Reseta em caso de erro de decodificação
     }
@@ -132,9 +139,9 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       final prefs = await SharedPreferences.getInstance();
       final String presencasJson = jsonEncode(_presencas);
       await prefs.setString(_presencasKey, presencasJson);
-      print("Histórico de presenças salvo (${_presencas.length} alunos).");
-    } catch (e) {
-      print("Erro ao salvar presenças: $e");
+      _log.info("Histórico de presenças salvo (${_presencas.length} alunos).");
+    } catch (e, s) {
+      _log.warning("Erro ao salvar presenças", e, s);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -195,7 +202,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       _port = _server!.port;
       _serverIp =
           wifiIP ?? "IP não encontrado"; // IP para exibir (conexão manual)
-      print(
+      _log.info(
         'Servidor iniciado. Escutando na porta $_port. IP da máquina: $_serverIp',
       );
 
@@ -212,7 +219,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           port: _port, // Porta onde o servidor WebSocket está rodando
         ),
       );
-      print('Serviço SmartPresence anunciado na rede local (NSD).');
+      _log.info('Serviço SmartPresence anunciado na rede local (NSD).');
 
       if (mounted) {
         setState(() {
@@ -220,8 +227,8 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           _serverStatus = 'Servidor rodando. Aguardando alunos...';
         });
       }
-    } catch (e) {
-      print('Erro crítico ao iniciar o servidor ou anunciar NSD: $e');
+    } catch (e, s) {
+      _log.severe('Erro crítico ao iniciar o servidor ou anunciar NSD', e, s);
       if (mounted)
         setState(
           () => _serverStatus = 'Falha ao iniciar. Verifique permissões/rede.',
@@ -240,7 +247,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         // Para o timer se a tela for removida ou servidor parado
         timer.cancel();
         _gameLoopTimer = null;
-        print("Game loop parado.");
+        _log.info("Game loop parado.");
         return;
       }
       final now = TimeOfDay.now();
@@ -267,14 +274,14 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         }
       }
     });
-    print("Game loop iniciado.");
+    _log.info("Game loop iniciado.");
   }
 
   // 6. AÇÕES DAS RODADAS (Start/End + Lógica de Ausência)
   String _generatePin() => (1000 + Random().nextInt(9000)).toString();
 
   void _startRodada(Rodada rodada) {
-    print("Iniciando ${rodada.nome} automaticamente!");
+    _log.info("Iniciando ${rodada.nome} automaticamente!");
     if (mounted) {
       setState(() {
         rodada.status = "Em Andamento";
@@ -289,7 +296,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
   }
 
   void _endRodada(Rodada rodada) {
-    print("Encerrando ${rodada.nome} automaticamente.");
+    _log.info("Encerrando ${rodada.nome} automaticamente.");
     if (mounted) {
       setState(() {
         rodada.status = "Encerrada";
@@ -303,7 +310,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           // Só marca como ausente se não houver registro para esta rodada específica
           if (!_presencas[aluno.nome]!.containsKey(rodada.nome)) {
             _presencas[aluno.nome]![rodada.nome] = 'Ausente';
-            print(
+            _log.info(
               "Aluno ${aluno.nome} marcado como Ausente para ${rodada.nome} (não respondeu).",
             );
           }
@@ -319,24 +326,24 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     if (WebSocketTransformer.isUpgradeRequest(request)) {
       WebSocketTransformer.upgrade(request)
           .then((websocket) {
-            print("Nova conexão WebSocket recebida.");
+            _log.info("Nova conexão WebSocket recebida.");
             websocket.listen(
               (message) => _handleClientMessage(websocket, message),
               onDone: () {
-                print("Conexão WebSocket fechada (onDone).");
+                _log.info("Conexão WebSocket fechada (onDone).");
                 _removeClient(websocket);
               },
-              onError: (error) {
-                print('Erro na conexão WebSocket (onError): $error');
+              onError: (error, s) {
+                _log.warning('Erro na conexão WebSocket (onError)', error, s);
                 _removeClient(websocket);
               },
               cancelOnError:
                   true, // Fecha a conexão se ocorrer um erro no stream
             );
           })
-          .catchError((e) {
+          .catchError((e, s) {
             // Erro durante o upgrade da conexão HTTP para WebSocket
-            print("Erro ao fazer upgrade para WebSocket: $e");
+            _log.warning("Erro ao fazer upgrade para WebSocket", e, s);
             // Tenta fechar a requisição HTTP de forma limpa
             request.response.statusCode = HttpStatus.internalServerError;
             request.response.close();
@@ -353,7 +360,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
   }
 
   void _handleClientMessage(WebSocket socket, dynamic message) {
-    print('Mensagem recebida: $message');
+    _log.fine('Mensagem recebida: $message'); // Nível 'fine' para verbose
     try {
       final data = jsonDecode(message as String);
       final String command = data['command'];
@@ -381,13 +388,13 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                   {}; // Inicializa mapa de presença se for a primeira vez
             });
             _savePresencas(); // Salva caso um novo aluno tenha sido adicionado ao histórico
-            print("Aluno $nome conectado e adicionado à lista.");
+            _log.info("Aluno $nome conectado e adicionado à lista.");
           }
         } else {
           // Se o cliente já existia, atualiza o objeto na lista (caso o nome mude, etc.)
           if (mounted) {
             setState(() => _clients[clientIndex] = aluno!);
-            print("Aluno $nome reconectado/atualizado.");
+            _log.info("Aluno $nome reconectado/atualizado.");
           }
         }
         // Confirma ao aluno que ele entrou na sala
@@ -400,7 +407,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       } else if (command == 'SUBMIT_PIN') {
         // Se não achou o cliente pelo socket (não enviou JOIN?), rejeita
         if (aluno == null) {
-          print(
+          _log.warning(
             "Recebido SUBMIT_PIN de socket não associado a um aluno. Rejeitando.",
           );
           socket.close(
@@ -423,14 +430,14 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         _presencas[aluno.nome] ??= {}; // Garante mapa
 
         if (rodadaAtiva.nome != 'Inválida' && pinEnviado == rodadaAtiva.pin) {
-          print('PIN Correto do aluno ${aluno.nome} para $rodadaNome');
+          _log.info('PIN Correto do aluno ${aluno.nome} para $rodadaNome');
           _presencas[aluno.nome]![rodadaNome] = 'Presente';
           _savePresencas(); // Salva a presença
           socket.add(
             jsonEncode({'command': 'PRESENCA_OK', 'rodada': rodadaNome}),
           );
         } else {
-          print(
+          _log.info(
             'PIN Incorreto ou rodada inválida do aluno ${aluno.nome} para $rodadaNome',
           );
           _presencas[aluno.nome]![rodadaNome] = 'Falhou PIN';
@@ -443,11 +450,11 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           );
         }
       } else {
-        print("Comando desconhecido recebido: $command");
+        _log.warning("Comando desconhecido recebido: $command");
         // Opcional: enviar erro de volta ao cliente
       }
-    } catch (e) {
-      print('Erro ao processar mensagem JSON ou lógica: $e');
+    } catch (e, s) {
+      _log.severe('Erro ao processar mensagem JSON ou lógica', e, s);
       // Opcional: enviar erro genérico ao cliente se a conexão ainda estiver ativa
       if (socket.readyState == WebSocket.open) {
         socket.add(
@@ -464,20 +471,20 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     final index = _clients.indexWhere((c) => c.socket == socket);
     if (index != -1) {
       final nomeAluno = _clients[index].nome;
-      print('Aluno $nomeAluno desconectado.');
+      _log.info('Aluno $nomeAluno desconectado.');
       if (mounted) {
         setState(() {
           _clients.removeAt(index);
         });
       }
     } else {
-      print("Tentativa de remover um socket desconhecido.");
+      _log.warning("Tentativa de remover um socket desconhecido.");
     }
   }
 
   void _broadcastMessage(Map<String, dynamic> message) {
     final jsonMessage = jsonEncode(message);
-    print("Enviando broadcast: $jsonMessage");
+    _log.fine("Enviando broadcast: $jsonMessage"); // Nível 'fine'
     final List<AlunoConectado> clientsCopy = List.from(_clients);
     int sentCount = 0;
     for (var client in clientsCopy) {
@@ -486,20 +493,24 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           client.socket.add(jsonMessage);
           sentCount++;
         } else {
-          print("Socket para ${client.nome} não estava aberto. Removendo.");
+          _log.info("Socket para ${client.nome} não estava aberto. Removendo.");
           _removeClient(client.socket); // Remove se o socket já estava fechado
         }
-      } catch (e) {
-        print("Erro ao enviar broadcast para ${client.nome}: $e. Removendo.");
+      } catch (e, s) {
+        _log.warning(
+          "Erro ao enviar broadcast para ${client.nome}: $e. Removendo.",
+          e,
+          s,
+        );
         _removeClient(client.socket); // Remove se houver erro ao enviar
       }
     }
-    print("Broadcast enviado para $sentCount clientes ativos.");
+    _log.info("Broadcast enviado para $sentCount clientes ativos.");
   }
 
   // 8. DESLIGAR O SERVIDOR (Processo de Encerramento Limpo)
   Future<void> _stopServer() async {
-    print("Iniciando processo de parada do servidor...");
+    _log.info("Iniciando processo de parada do servidor...");
     _gameLoopTimer?.cancel();
     _gameLoopTimer = null;
 
@@ -507,15 +518,15 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     if (_registration != null) {
       try {
         await unregister(_registration!);
-        print("Serviço NSD cancelado com sucesso.");
-      } catch (e) {
-        print("Erro ao cancelar registro NSD: $e");
+        _log.info("Serviço NSD cancelado com sucesso.");
+      } catch (e, s) {
+        _log.warning("Erro ao cancelar registro NSD", e, s);
       }
       _registration = null;
     }
 
     // Fecha as conexões dos clientes
-    print("Fechando conexões de ${_clients.length} clientes...");
+    _log.info("Fechando conexões de ${_clients.length} clientes...");
     final List<AlunoConectado> clientsToClose = List.from(_clients);
     for (var client in clientsToClose) {
       try {
@@ -523,20 +534,20 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           WebSocketStatus.goingAway,
           "Servidor encerrando.",
         );
-        print("Conexão com ${client.nome} fechada.");
-      } catch (e) {
-        print("Erro ao fechar socket do cliente ${client.nome}: $e");
+        _log.info("Conexão com ${client.nome} fechada.");
+      } catch (e, s) {
+        _log.warning("Erro ao fechar socket do cliente ${client.nome}", e, s);
       }
     }
     _clients.clear();
 
     // Fecha o servidor HTTP/WebSocket
-    print("Parando o servidor HTTP...");
+    _log.info("Parando o servidor HTTP...");
     try {
       await _server?.close(force: true);
-      print("Servidor HTTP/WebSocket parado com sucesso.");
-    } catch (e) {
-      print("Erro ao fechar servidor HTTP: $e");
+      _log.info("Servidor HTTP/WebSocket parado com sucesso.");
+    } catch (e, s) {
+      _log.warning("Erro ao fechar servidor HTTP", e, s);
     }
     _server = null;
 
@@ -550,11 +561,12 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         // Mantém _rodadas e _presencas carregados
       });
     }
-    print('Processo de parada do servidor concluído.');
+    _log.info('Processo de parada do servidor concluído.');
   }
 
   // 9. NAVEGAR PARA O HISTÓRICO
   void _navigateToHistorico(BuildContext context) {
+    _log.info('Navegando para HistoricoScreen');
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -586,9 +598,9 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       }
     }
 
-    print("\n--- INÍCIO CSV SIMULADO (${DateTime.now()}) ---");
-    print(csvData.toString());
-    print("--- FIM CSV SIMULADO ---\n");
+    _log.info("\n--- INÍCIO CSV SIMULADO (${DateTime.now()}) ---");
+    _log.info("DADOS CSV:\n$csvData"); // Log dos dados
+    _log.info("--- FIM CSV SIMULADO ---\n");
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -661,10 +673,54 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
 
   Widget _buildBody() {
     if (_isLoading) {
-      /* ... Indicador de Loading ... */
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Carregando e iniciando servidor...'),
+          ],
+        ),
+      );
     }
     if (_rodadas.isEmpty && !_isLoading) {
-      /* ... Tela de Erro (Programar Horários) ... */
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, color: Colors.red, size: 60),
+              const SizedBox(height: 16),
+              const Text(
+                'Erro Fatal',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Os horários das 4 rodadas não foram programados. Por favor, programe os horários na tela de Configurações antes de iniciar o painel.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.settings_rounded),
+                label: const Text('Ir para Configurações'),
+                onPressed: () {
+                  // Navega para as configurações e *substitui* a tela atual
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (context) => const ConfiguracoesScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      );
     }
     // Painel principal com as rodadas
     return RefreshIndicator(
@@ -772,7 +828,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                   ), // Tamanho ajustado
                   const SizedBox(height: 4),
                   Text(
-                    'Início: ${rodada.horaInicio.format(context)}  |  Status: ${rodada.status}',
+                    'Início: ${rodada.horaInicio.format(context)}  |  Status: ${rodada.status}',
                     style: const TextStyle(
                       fontSize: 15,
                       color: Colors.black54,
