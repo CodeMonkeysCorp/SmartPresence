@@ -39,19 +39,18 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     _listenToServer(); // Começa a escutar por mensagens do servidor
 
     // Envia a mensagem JOIN para se identificar ao servidor
-    final joinMessage = jsonEncode({
-      'command': 'JOIN',
-      'nome': widget.nomeAluno,
-    });
-    widget.channel.sink.add(joinMessage);
+    final joinMessage = {'command': 'JOIN', 'nome': widget.nomeAluno};
+    widget.channel.sink.add(jsonEncode(joinMessage));
 
-    // 3. Substituir print() por _log.info()
-    _log.info('Mensagem JOIN enviada para o servidor: $joinMessage');
+    // 3. Substituir 'print' por 'log'
+    _log.info(
+      'Mensagem JOIN enviada para o servidor com nome: ${widget.nomeAluno}.',
+    );
   }
 
   @override
   void dispose() {
-    _log.info('Dispose: Tela fechada, cancelando subscription.');
+    _log.info('Tela de espera (AlunoWaitScreen) sendo fechada (dispose).');
     _isDisposed = true; // Marca como disposed
     _subscription?.cancel(); // Cancela a escuta do stream
     // O fechamento do channel.sink é feito no onDone/onError do listener
@@ -67,7 +66,7 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       (message) {
         if (_isDisposed) return; // Se a tela foi fechada, não faz nada
 
-        // 3. Substituir print() por _log.fine() (para logs detalhados/frequentes)
+        // 3. Usar nível 'fine' para logs de alta frequência
         _log.fine("Mensagem recebida do professor: $message");
         try {
           // Decodifica a mensagem JSON
@@ -89,16 +88,14 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                     data['nome'] ?? ''; // Guarda o nome da rodada
                 _showPinInput = true; // Mostra o campo para digitar o PIN
                 _pinController.clear(); // Limpa campo anterior
-                _log.info(
-                  'Rodada $_currentRodadaName aberta. Mostrando input de PIN.',
-                );
+                _log.info('Rodada aberta pelo servidor: $_currentRodadaName');
                 break;
               case 'RODADA_FECHADA': // Servidor encerrou a rodada
                 _statusMessage =
                     'A ${data['nome'] ?? 'rodada'} foi encerrada. Aguardando a próxima...';
                 _showPinInput = false; // Esconde o campo de PIN
                 _pinController.clear(); // Limpa o campo
-                _log.info('Rodada ${data['nome']} fechada.');
+                _log.info('Rodada fechada pelo servidor: ${data['nome']}');
                 break;
               case 'PRESENCA_OK': // Servidor confirmou o PIN
                 _statusMessage =
@@ -106,7 +103,7 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                 _showPinInput = false; // Esconde o campo de PIN
                 _pinController.clear();
                 _log.info(
-                  'Presença OK para ${widget.nomeAluno} na ${data['rodada']}.',
+                  'Presença OK para ${widget.nomeAluno} na ${data['rodada']}',
                 );
                 // Mostra um feedback rápido de sucesso
                 if (mounted) {
@@ -123,7 +120,7 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                 _statusMessage =
                     data['message'] ?? 'PIN incorreto. Tente novamente.';
                 _log.warning(
-                  'Presença FALHA para ${widget.nomeAluno}: $_statusMessage',
+                  'Falha no PIN para ${widget.nomeAluno} na $_currentRodadaName',
                 );
                 // Mostra um feedback rápido de erro
                 if (mounted) {
@@ -142,18 +139,18 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                 _statusMessage =
                     data['message'] ?? 'Ocorreu um erro no servidor.';
                 _showPinInput = false;
+                // 3. Usar nível 'severe' para erros
                 _log.severe('Erro recebido do servidor: $_statusMessage');
                 break;
               default:
-                // 3. Substituir print() por _log.warning() (para casos inesperados)
+                // 3. Usar nível 'warning' para comandos inesperados
                 _log.warning(
                   "Comando desconhecido recebido do servidor: $command",
                 );
             }
           });
-          // 3. Substituir print() por _log.severe() (para erros)
-          // e mudar 'catch(e)' para 'catch(e, stackTrace)'
         } catch (e, stackTrace) {
+          // 3. Usar nível 'severe' para erros de parsing
           _log.severe(
             "Erro ao processar mensagem JSON do servidor: $message",
             e,
@@ -166,33 +163,42 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       onDone: () {
         // Conexão fechada pelo servidor
         if (_isDisposed) return;
-        // 3. Substituir print() por _log.info()
         _log.info("Conexão WebSocket fechada pelo servidor (onDone).");
         setState(() {
           _statusMessage = 'Desconectado pelo professor. Você pode voltar.';
           _showPinInput = false;
-          // Opcional: Habilitar botão de voltar ou fechar automaticamente
         });
         widget.channel.sink.close(); // Fecha o lado do cliente
+
+        // *** ALTERAÇÃO SOLICITADA ***
+        // Volta para a tela anterior automaticamente
+        if (mounted) {
+          _log.info('Conexão fechada. Navegando de volta (pop)...');
+          Navigator.of(context).pop();
+        }
       },
-      // 3. Mudar 'onError(error)' para 'onError(error, stackTrace)'
       onError: (error, stackTrace) {
         // Erro na conexão WebSocket
         if (_isDisposed) return;
-        // 3. Substituir print() por _log.severe()
-        _log.severe('Erro na conexão WebSocket (onError).', error, stackTrace);
+        // 3. Usar 'severe' e passar o erro e stackTrace
+        _log.severe('Erro na conexão WebSocket (onError)', error, stackTrace);
         setState(() {
           _statusMessage =
               'Erro de conexão com o servidor. Tente entrar novamente.';
           _showPinInput = false;
-          // Opcional: Habilitar botão de voltar
         });
         widget.channel.sink.close(); // Fecha o lado do cliente
+
+        // *** ALTERAÇÃO SOLICITADA ***
+        // Volta para a tela anterior automaticamente
+        if (mounted) {
+          _log.info('Erro na conexão. Navegando de volta (pop)...');
+          Navigator.of(context).pop();
+        }
       },
       cancelOnError: true, // Cancela a subscrição se ocorrer um erro
     );
-    // 3. Substituir print() por _log.info()
-    _log.info("Iniciou a escuta por mensagens do servidor.");
+    _log.info("AlunoWaitScreen: Iniciou a escuta por mensagens do servidor.");
   }
 
   // Envia o PIN digitado para o servidor
@@ -200,7 +206,6 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     final pin = _pinController.text.trim();
     // Valida se o PIN tem 4 dígitos
     if (pin.length == 4) {
-      // 3. Substituir print() por _log.info()
       _log.info("Enviando PIN $pin para a rodada $_currentRodadaName");
       // Envia o comando SUBMIT_PIN para o servidor
       widget.channel.sink.add(
@@ -217,7 +222,7 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       });
     } else {
       // Mostra erro se o PIN não tiver 4 dígitos
-      _log.warning('Tentativa de enviar PIN inválido (tamanho != 4): $pin');
+      _log.warning('Tentativa de submeter PIN inválido (tamanho != 4): $pin');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('O PIN deve ter exatamente 4 dígitos.'),
@@ -245,6 +250,12 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
           ),
           // Remove o botão de voltar padrão da AppBar
           automaticallyImplyLeading: false,
+
+          // --- ATUALIZAÇÃO VISUAL (Sugestão 4) ---
+          backgroundColor: Theme.of(context).primaryColor, // Cor do fundo
+          foregroundColor: Colors.white, // Cor do título e ícones
+          elevation: 0, // Sem sombra, para integrar
+          // ------------------------------------
         ),
         // Fundo na cor primária do tema
         backgroundColor: Theme.of(context).primaryColor,

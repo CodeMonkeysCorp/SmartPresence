@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:logging/logging.dart'; // 1. Importar o logging
-
+import 'package:logging/logging.dart'; // Importa o logging
 // Importa as telas que serão navegadas
 import 'aluno_join_screen.dart';
 import 'configuracoes_screen.dart';
 import 'professor_host_screen.dart';
 
-// 2. Criar a instância do Logger
+// Instância do Logger para esta tela
 final _log = Logger('RoleSelectionScreen');
 
 class RoleSelectionScreen extends StatelessWidget {
@@ -14,7 +13,6 @@ class RoleSelectionScreen extends StatelessWidget {
 
   // Função para navegar para a tela do Professor
   void _navigateToProfessorHost(BuildContext context) {
-    // 3. Adicionar log de navegação
     _log.info('Navegando para ProfessorHostScreen');
     Navigator.push(
       context,
@@ -24,7 +22,6 @@ class RoleSelectionScreen extends StatelessWidget {
 
   // Função para navegar para a tela do Aluno
   void _navigateToAlunoJoin(BuildContext context) {
-    // 3. Adicionar log de navegação
     _log.info('Navegando para AlunoJoinScreen');
     Navigator.push(
       context,
@@ -34,7 +31,6 @@ class RoleSelectionScreen extends StatelessWidget {
 
   // Função para navegar para a tela de Configurações
   void _navigateToConfiguracoes(BuildContext context) {
-    // 3. Adicionar log de navegação
     _log.info('Navegando para ConfiguracoesScreen');
     Navigator.push(
       context,
@@ -49,8 +45,10 @@ class RoleSelectionScreen extends StatelessWidget {
         title: const Text(
           'SmartPresence',
         ), // Usa o estilo definido no main.dart
-        backgroundColor: Colors.white, // AppBar branca nesta tela
-        elevation: 0, // Sem sombra na AppBar desta tela
+        // --- ATUALIZAÇÃO VISUAL ---
+        // Removido 'backgroundColor' e 'elevation'
+        // Agora usa o appBarTheme global (branco, com sombra)
+        // -------------------------
         actions: [
           // Botão para o professor programar os horários
           IconButton(
@@ -64,51 +62,42 @@ class RoleSelectionScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: Container(
-        // Fundo com gradiente colorido
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Theme.of(context).primaryColor, // Roxo/Azul do tema
-              Theme.of(
-                context,
-              ).primaryColor.withOpacity(0.7), // Variação mais clara
+      // --- ATUALIZAÇÃO VISUAL ---
+      // O Container com gradiente foi removido.
+      // O body agora é o Center, e o fundo usará o
+      // 'scaffoldBackgroundColor' (cinza claro) do main.dart.
+      // -------------------------
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment:
+                CrossAxisAlignment.stretch, // Faz os botões ocuparem a largura
+            children: [
+              // Botão "Sou Professor"
+              _RoleButton(
+                text: 'Sou Professor',
+                icon: Icons.school_rounded,
+                color: Colors.white, // Fundo branco
+                textColor: Theme.of(
+                  context,
+                ).primaryColor, // Texto na cor do tema
+                onPressed: () => _navigateToProfessorHost(context),
+              ),
+              const SizedBox(height: 24), // Espaçamento entre botões
+              // Botão "Sou Aluno"
+              _RoleButton(
+                text: 'Sou Aluno',
+                icon: Icons.person_rounded,
+                // --- ATUALIZAÇÃO VISUAL ---
+                // Cor do botão alterada para ser visível no fundo claro
+                color: Theme.of(context).primaryColor,
+                textColor: Colors.white, // Texto branco
+                // -------------------------
+                onPressed: () => _navigateToAlunoJoin(context),
+              ),
             ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment
-                  .stretch, // Faz os botões ocuparem a largura
-              children: [
-                // Botão "Sou Professor"
-                _RoleButton(
-                  text: 'Sou Professor',
-                  icon: Icons.school_rounded,
-                  color: Colors.white, // Fundo branco
-                  textColor: Theme.of(
-                    context,
-                  ).primaryColor, // Texto na cor do tema
-                  onPressed: () => _navigateToProfessorHost(context),
-                ),
-                const SizedBox(height: 24), // Espaçamento entre botões
-                // Botão "Sou Aluno"
-                _RoleButton(
-                  text: 'Sou Aluno',
-                  icon: Icons.person_rounded,
-                  color: Colors.white.withOpacity(
-                    0.25,
-                  ), // Fundo branco semi-transparente
-                  textColor: Colors.white, // Texto branco
-                  onPressed: () => _navigateToAlunoJoin(context),
-                ),
-              ],
-            ),
           ),
         ),
       ),

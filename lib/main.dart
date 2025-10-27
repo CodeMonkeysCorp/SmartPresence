@@ -5,6 +5,7 @@ import 'package:intl/intl.dart'; // Para locale pt_BR
 import 'screens/role_selection_screen.dart'; // Tela inicial
 import 'package:flutter/foundation.dart'; // Para kDebugMode
 import 'package:logging/logging.dart';
+import 'package:google_fonts/google_fonts.dart'; // Importe o pacote
 
 Future<void> main() async {
   // Garante que os bindings do Flutter foram inicializados
@@ -57,20 +58,35 @@ class SmartPresenceApp extends StatelessWidget {
         useMaterial3: true,
         // Cor de fundo padrão para Scaffolds
         scaffoldBackgroundColor: const Color(0xFFF0F2F5),
+        // Fonte Padrão
+        fontFamily: GoogleFonts.inter().fontFamily,
         // Estilo padrão para AppBar
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           backgroundColor: Colors.white,
           foregroundColor: Colors.black87, // Cor do título e ícones
           elevation: 1, // Pequena sombra
-          titleTextStyle: TextStyle(
+          titleTextStyle: GoogleFonts.inter(
             // Estilo do título
             fontSize: 20,
             fontWeight: FontWeight.bold,
             color: Colors.black87,
           ),
         ),
-        // Opcional: Definir uma fonte padrão
-        // fontFamily: 'Inter',
+        // Estilo do texto geral
+        textTheme: GoogleFonts.interTextTheme(Theme.of(context).textTheme),
+
+        // *** CORRIGIDO AQUI ***
+        // Deve ser CardThemeData, não CardTheme
+        cardTheme: CardThemeData(
+          elevation: 2,
+          shadowColor: Colors.black.withOpacity(0.1),
+          shape: RoundedRectangleBorder(
+            // Use o mesmo raio dos seus botões para consistência
+            borderRadius: BorderRadius.circular(16.0),
+          ),
+          // Define uma margem padrão para os cards
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        ),
       ),
       debugShowCheckedModeBanner: false, // Remove o banner de debug
       // Configurações de localização para pt_BR
