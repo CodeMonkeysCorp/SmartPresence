@@ -274,6 +274,7 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
         appBar: AppBar(
           title: Text(
             _showPinInput ? 'Registre sua Presença!' : 'Sala de Espera',
+            style: TextStyle(color: Colors.white),
           ),
           automaticallyImplyLeading: false, // Esconde o botão de voltar padrão
           backgroundColor: Theme.of(context).primaryColor,
