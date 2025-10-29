@@ -1,32 +1,38 @@
-import 'dart:io'; // Para WebSocket
+// lib/models/app_models.dart
+
 import 'package:flutter/material.dart'; // Para TimeOfDay
+import 'dart:io'; // Para WebSocket
 
-// Modelo para o aluno conectado
-// Agora inclui a matrícula
-class AlunoConectado {
-  final WebSocket socket;
-  final String nome;
-  final String matricula; // NOVO CAMPO
+// Modelos do Aplicativo
 
-  AlunoConectado({
-    required this.socket,
-    required this.nome,
-    required this.matricula, // NOVO CAMPO
-  });
-}
-
-// Modelo para a rodada
-// (Sem alteração, mas movido para este arquivo)
+// Classe para representar uma rodada de chamada
 class Rodada {
   final String nome;
-  final TimeOfDay horaInicio;
-  String status; // "Aguardando", "Em Andamento", "Encerrada"
-  String? pin;
+  TimeOfDay horaInicio;
+  String status; // Ex: "Aguardando", "Em Andamento", "Encerrada"
+  String? pin; // PIN gerado para a rodada, pode ser nulo
 
   Rodada({
     required this.nome,
     required this.horaInicio,
     this.status = "Aguardando",
     this.pin,
+  });
+}
+
+// Classe para representar um aluno conectado ao servidor do professor
+class AlunoConectado {
+  final WebSocket socket; // O socket WebSocket do aluno
+  final String matricula; // Matrícula do aluno
+  final String nome; // Nome de exibição do aluno
+  final String ip; // Endereço IP do aluno >>>
+  final DateTime connectedAt; // Timestamp da conexão >>>
+
+  AlunoConectado({
+    required this.socket,
+    required this.matricula,
+    required this.nome,
+    required this.ip,
+    required this.connectedAt,
   });
 }

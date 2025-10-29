@@ -10,20 +10,15 @@ dependencies:
   flutter:
     sdk: flutter
   
-  # Pacote que faltava (para pt_BR)
   flutter_localizations:
     sdk: flutter
 
-  # Comunicação WebSocket
   web_socket_channel: ^2.4.5 
   
-  # Descoberta de Rede Local (NSD / mDNS)
   nsd: ^4.0.3
 
-  # Salvar configurações de horário do professor
   shared_preferences: ^2.2.3
   
-  # Para formatar datas e horas
   intl: ^0.20.2
 
   network_info_plus: ^5.0.3
@@ -39,6 +34,16 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/logo/logo.png
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo/logo.png"
+  adaptive_icon_background: "#4A00E0"

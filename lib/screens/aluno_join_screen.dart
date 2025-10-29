@@ -200,7 +200,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
       return;
     }
 
-    final wsUrl = 'ws://$host:$port';
+    final wsUrl = '$host:$port';
     _log.info('Tentando conectar via WebSocket a: $wsUrl');
 
     setState(() {

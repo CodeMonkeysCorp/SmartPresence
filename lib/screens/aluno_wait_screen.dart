@@ -1,23 +1,24 @@
-import 'dart:async';
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Para input formatters
+// lib/screens/aluno_wait_screen.dart
+
+import 'dart:async'; // Para Timer
+import 'dart:convert'; // Para jsonEncode, jsonDecode
+import 'package:flutter/material.dart'; // Para Widgets Flutter
+import 'package:flutter/services.dart'; // Para HapticFeedback e FilteringTextInputFormatter
 import 'package:logging/logging.dart'; // Para logging
-import 'package:web_socket_channel/web_socket_channel.dart'; // Para WebSocket
+import 'package:web_socket_channel/web_socket_channel.dart'; // Para WebSocketChannel
 
 final _log = Logger('AlunoWaitScreen');
 
 class AlunoWaitScreen extends StatefulWidget {
-  final WebSocketChannel channel; // Canal de comunicação recebido
-  final String nomeAluno; // Nome do aluno recebido
-  // --- CAMPO ADICIONADO ---
-  final String matriculaAluno; // MATRÍCULA DO ALUNO
+  final WebSocketChannel
+  channel; // Canal de comunicação WebSocket já estabelecido
+  final String nomeAluno; // Nome do aluno
+  final String matriculaAluno; // Matrícula do aluno
 
   const AlunoWaitScreen({
     super.key,
     required this.channel,
     required this.nomeAluno,
-    // --- PARÂMETRO ADICIONADO ---
     required this.matriculaAluno,
   });
 
@@ -26,15 +27,22 @@ class AlunoWaitScreen extends StatefulWidget {
 }
 
 class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
-  // Estado da UI
-  String _statusMessage = 'Entrando na sala...'; // Mensagem inicial
-  String _currentRodadaName = ''; // Nome da rodada ativa
-  bool _showPinInput = false; // Controla se mostra campo de PIN ou loading
-  bool _isDisposed = false; // Flag para evitar setState após dispose
+  // --- Estados da UI e Lógica ---
+  String _statusMessage =
+      'Entrando na sala...'; // Mensagem de status para o aluno
+  String _currentRodadaName = ''; // Nome da rodada de presença atualmente ativa
+  bool _showPinInput = false; // Controla se mostra o campo de PIN
 
   final TextEditingController _pinController =
       TextEditingController(); // Controller do campo PIN
   StreamSubscription? _subscription; // Para ouvir mensagens do servidor
+  bool _isDisposed = false; // Flag para evitar setState após dispose
+
+  // --- Estados para o timer e o fim da rodada (NOVOS) ---
+  DateTime? _rodadaEndTime; // O momento em que a rodada atual deve terminar
+  Timer? _rodadaTimer; // Timer que atualiza o tempo restante a cada segundo
+  Duration _remainingTime = Duration.zero; // Duração restante para a rodada
+  // --- FIM NOVOS ESTADOS ---
 
   @override
   void initState() {
@@ -42,13 +50,11 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     _listenToServer(); // Começa a escutar por mensagens do servidor
 
     // Envia a mensagem JOIN para se identificar ao servidor
-    // AGORA INCLUI A MATRÍCULA
     final joinMessage = jsonEncode({
       'command': 'JOIN',
       'nome': widget.nomeAluno,
-      'matricula': widget.matriculaAluno, // USA A MATRÍCULA RECEBIDA
+      'matricula': widget.matriculaAluno,
     });
-
     widget.channel.sink.add(joinMessage);
     _log.info('Mensagem JOIN enviada para o servidor: $joinMessage');
   }
@@ -57,14 +63,14 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
   void dispose() {
     _isDisposed = true; // Marca como disposed
     _subscription?.cancel(); // Cancela a escuta do stream
-    // O fechamento do channel.sink é feito no onDone/onError do listener
+    _rodadaTimer
+        ?.cancel(); // Cancela o timer da rodada, se estiver ativo (NOVO)
     _pinController.dispose(); // Limpa o controller do TextField
+    // O fechamento do widget.channel.sink é feito no onDone/onError do listener ou na tela anterior
     super.dispose();
   }
 
-  // --- Lógica de Rede ---
-
-  // Função principal que escuta e processa mensagens do servidor
+  /// Inicia a escuta por mensagens do servidor WebSocket.
   void _listenToServer() {
     _subscription = widget.channel.stream.listen(
       (message) {
@@ -72,64 +78,61 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
 
         _log.fine("Mensagem recebida do professor: $message");
         try {
-          // Decodifica a mensagem JSON
           final data = jsonDecode(message);
           final String command = data['command'];
 
-          // Atualiza o estado da UI baseado no comando recebido
           setState(() {
             switch (command) {
-              case 'JOIN_SUCCESS': // Servidor confirmou a entrada
+              case 'JOIN_SUCCESS':
                 _statusMessage =
                     "Você está na sala! Aguardando início das rodadas...";
                 break;
-              case 'RODADA_ABERTA': // Servidor iniciou uma rodada
+              case 'RODADA_ABERTA':
+                HapticFeedback.heavyImpact(); // Vibra o celular para avisar (NOVO)
                 _statusMessage =
                     data['message'] ?? 'Rodada iniciada! Insira o PIN.';
-                _currentRodadaName =
-                    data['nome'] ?? ''; // Guarda o nome da rodada
-                _showPinInput = true; // Mostra o campo para digitar o PIN
-                _pinController.clear(); // Limpa campo anterior
+                _currentRodadaName = data['nome'] ?? '';
+                _showPinInput = true;
+                _pinController.clear();
+
+                // --- NOVO: Inicia o timer da rodada ---
+                final int? endTimeMillis = data['endTimeMillis'];
+                if (endTimeMillis != null) {
+                  _rodadaEndTime = DateTime.fromMillisecondsSinceEpoch(
+                    endTimeMillis,
+                  );
+                  _startRodadaTimer(); // Inicia o timer regressivo
+                } else {
+                  _log.warning('RODADA_ABERTA sem endTimeMillis.');
+                }
+                // --- FIM NOVO ---
                 break;
-              case 'RODADA_FECHADA': // Servidor encerrou a rodada
+              case 'RODADA_FECHADA':
+                HapticFeedback.mediumImpact(); // Vibra o celular para avisar (NOVO)
                 _statusMessage =
                     'A ${data['nome'] ?? 'rodada'} foi encerrada. Aguardando a próxima...';
-                _showPinInput = false; // Esconde o campo de PIN
-                _pinController.clear(); // Limpa o campo
+                _showPinInput = false;
+                _pinController.clear();
+                _currentRodadaName = ''; // Limpa a rodada ativa
+                _rodadaEndTime = null; // Reinicia o tempo da rodada (NOVO)
+                _rodadaTimer?.cancel(); // Cancela o timer da rodada (NOVO)
+                _remainingTime = Duration.zero; // Zera o tempo restante (NOVO)
                 break;
-              case 'PRESENCA_OK': // Servidor confirmou o PIN
+              case 'PRESENCA_OK':
+                HapticFeedback.lightImpact(); // Vibração leve para sucesso (NOVO)
                 _statusMessage =
                     'Presença confirmada para a ${data['rodada']}!';
-                _showPinInput = false; // Esconde o campo de PIN
+                _showPinInput = false; // Esconde o campo de PIN após sucesso
                 _pinController.clear();
-                // Mostra um feedback rápido de sucesso
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(_statusMessage),
-                      backgroundColor: Colors.green,
-                      duration: const Duration(seconds: 2),
-                    ),
-                  );
-                }
                 break;
-              case 'PRESENCA_FALHA': // Servidor indicou PIN errado ou falha
+              case 'PRESENCA_FALHA':
+                HapticFeedback.vibrate(); // Vibração padrão para falha (NOVO)
                 _statusMessage =
                     data['message'] ?? 'PIN incorreto. Tente novamente.';
-                // Mostra um feedback rápido de erro
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(_statusMessage),
-                      backgroundColor: Colors.red,
-                      duration: const Duration(seconds: 2),
-                    ),
-                  );
-                }
-                // Mantém _showPinInput = true para permitir nova tentativa
-                _pinController.clear(); // Limpa o campo para nova digitação
+                // _showPinInput permanece true para permitir nova tentativa
+                _pinController.clear();
                 break;
-              case 'ERROR': // Servidor enviou um erro genérico
+              case 'ERROR':
                 _statusMessage =
                     data['message'] ?? 'Ocorreu um erro no servidor.';
                 _showPinInput = false;
@@ -141,26 +144,31 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                 );
             }
           });
+          // Mostra SnackBar para feedback rápido ao usuário
+          _showSnackBar(
+            _statusMessage,
+            isError: command == 'PRESENCA_FALHA' || command == 'ERROR',
+          );
         } catch (e, s) {
           _log.severe("Erro ao processar mensagem JSON do servidor", e, s);
         }
       },
       onDone: () {
-        // Conexão fechada pelo servidor
         if (_isDisposed) return;
         _log.info("Conexão WebSocket fechada pelo servidor (onDone).");
         if (mounted) {
           setState(() {
             _statusMessage = 'Desconectado pelo professor. Você pode voltar.';
             _showPinInput = false;
+            _rodadaEndTime = null; // Reinicia o tempo da rodada (NOVO)
+            _rodadaTimer?.cancel(); // Cancela o timer da rodada (NOVO)
+            _remainingTime = Duration.zero; // Zera o tempo restante (NOVO)
           });
-          // Volta automaticamente para a tela anterior
-          Navigator.of(context).pop();
+          Navigator.of(context).pop(); // Volta automaticamente
         }
-        widget.channel.sink.close(); // Fecha o lado do cliente
+        widget.channel.sink.close();
       },
       onError: (error, s) {
-        // Erro na conexão WebSocket
         if (_isDisposed) return;
         _log.severe('Erro na conexão WebSocket (onError)', error, s);
         if (mounted) {
@@ -168,104 +176,145 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
             _statusMessage =
                 'Erro de conexão com o servidor. Tente entrar novamente.';
             _showPinInput = false;
+            _rodadaEndTime = null; // Reinicia o tempo da rodada (NOVO)
+            _rodadaTimer?.cancel(); // Cancela o timer da rodada (NOVO)
+            _remainingTime = Duration.zero; // Zera o tempo restante (NOVO)
           });
-          // Volta automaticamente para a tela anterior
-          Navigator.of(context).pop();
+          Navigator.of(context).pop(); // Volta automaticamente
         }
-        widget.channel.sink.close(); // Fecha o lado do cliente
+        widget.channel.sink.close();
       },
-      cancelOnError: true, // Cancela a subscrição se ocorrer um erro
+      cancelOnError: true,
     );
     _log.info("AlunoWaitScreen: Iniciou a escuta por mensagens do servidor.");
   }
 
-  // Envia o PIN digitado para o servidor
+  /// --- NOVO: Inicia o timer regressivo para a rodada atual ---
+  void _startRodadaTimer() {
+    _rodadaTimer?.cancel(); // Cancela qualquer timer anterior
+    if (_rodadaEndTime == null)
+      return; // Não faz nada se não houver tempo de fim definido
+
+    _rodadaTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _isDisposed) {
+        timer
+            .cancel(); // Para o timer se o widget não estiver montado ou estiver sendo descartado
+        return;
+      }
+      final now = DateTime.now();
+      final remaining = _rodadaEndTime!.difference(now); // Calcula a diferença
+
+      if (remaining.isNegative || remaining.inSeconds <= 0) {
+        timer.cancel(); // Para o timer quando o tempo acaba
+        setState(() {
+          _remainingTime = Duration.zero; // Zera o tempo
+          if (_currentRodadaName.isNotEmpty) {
+            _statusMessage = 'Tempo esgotado para $_currentRodadaName.';
+            _currentRodadaName = ''; // Rodada acabou
+          }
+          _showPinInput = false; // Esconde o campo de PIN
+          _pinController.clear();
+        });
+        HapticFeedback.lightImpact(); // Pequena vibração ao terminar (NOVO)
+        _log.info("Timer da rodada esgotado.");
+      } else {
+        setState(() {
+          _remainingTime = remaining; // Atualiza o tempo restante
+        });
+      }
+    });
+    _log.info("Timer da rodada iniciado. Fim em: $_rodadaEndTime");
+  }
+  // --- FIM NOVO ---
+
+  /// Envia o PIN digitado para o servidor.
   void _submitPin() {
     final pin = _pinController.text.trim();
-    // Valida se o PIN tem 4 dígitos
-    if (pin.length == 4) {
-      _log.info("Enviando PIN $pin para a rodada $_currentRodadaName");
-      // Envia o comando SUBMIT_PIN para o servidor
-      widget.channel.sink.add(
-        jsonEncode({
-          'command': 'SUBMIT_PIN',
-          'rodada': _currentRodadaName, // Nome da rodada atual
-          'pin': pin, // PIN digitado
-          // A matrícula/nome não precisam ser enviados aqui,
-          // pois o servidor já associou este 'socket' a um aluno
-        }),
-      );
-      // Atualiza UI para indicar que está verificando
-      setState(() {
-        _statusMessage = 'Verificando PIN...';
-        // Não esconde o input ainda, espera a resposta do servidor
-      });
-    } else {
-      // Mostra erro se o PIN não tiver 4 dígitos
+    if (_currentRodadaName.isEmpty) {
+      _showSnackBar('Nenhuma rodada ativa para enviar o PIN.', isError: true);
+      return;
+    }
+    if (pin.length != 4) {
+      // Valida se o PIN tem 4 dígitos
+      _showSnackBar('O PIN deve ter exatamente 4 dígitos.', isError: true);
+      return;
+    }
+    if (_remainingTime.inSeconds <= 0) {
+      // Verifica se o tempo ainda não acabou (NOVO)
+      _showSnackBar('Tempo esgotado para enviar o PIN.', isError: true);
+      return;
+    }
+
+    _log.info("Enviando PIN $pin para a rodada $_currentRodadaName");
+    widget.channel.sink.add(
+      jsonEncode({
+        'command': 'SUBMIT_PIN',
+        'rodada': _currentRodadaName,
+        'pin': pin,
+      }),
+    );
+    setState(() {
+      _statusMessage =
+          'Verificando PIN...'; // Atualiza UI para indicar que está verificando
+    });
+  }
+
+  /// Exibe um SnackBar (notificação temporária) na parte inferior da tela.
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('O PIN deve ter exatamente 4 dígitos.'),
-          backgroundColor: Colors.orange,
+        SnackBar(
+          content: Text(message),
+          backgroundColor: isError ? Colors.red : Colors.green,
+          duration: const Duration(seconds: 3), // Duração padrão do SnackBar
         ),
       );
     }
   }
 
-  // --- Construção da UI ---
   @override
   Widget build(BuildContext context) {
-    // WillPopScope impede o usuário de voltar usando o botão físico/gesto
     return WillPopScope(
-      onWillPop: () async => false, // Retorna false para impedir o "voltar"
+      onWillPop: () async => false, // Impede o "voltar"
       child: Scaffold(
         appBar: AppBar(
           title: Text(
             _showPinInput ? 'Registre sua Presença!' : 'Sala de Espera',
           ),
-          automaticallyImplyLeading: false,
-          // UI ATUALIZADA (SUGESTÃO ANTERIOR)
-          backgroundColor: Theme.of(context).primaryColor, // Cor do fundo
-          foregroundColor: Colors.white, // Cor do título e ícones
-          elevation: 0, // Sem sombra, para integrar
+          automaticallyImplyLeading: false, // Esconde o botão de voltar padrão
+          backgroundColor: Theme.of(context).primaryColor,
+          foregroundColor: Colors.white,
+          elevation: 0,
         ),
-        // Fundo na cor primária do tema
         backgroundColor: Theme.of(context).primaryColor,
         body: Center(
-          // AnimatedSwitcher faz a transição suave
           child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300), // Duração da animação
+            duration: const Duration(milliseconds: 300),
             transitionBuilder: (Widget child, Animation<double> animation) {
-              // Animação de Fade
               return FadeTransition(opacity: animation, child: child);
             },
-            // Decide qual UI mostrar
             child: _showPinInput
-                ? _buildPinInputView(context) // Mostra campo de PIN
-                : _buildWaitingView(context), // Mostra indicador de espera
+                ? _buildPinInputView(context)
+                : _buildWaitingView(context),
           ),
         ),
       ),
     );
   }
 
-  // Widget para a UI de "Aguardando"
+  /// Widget para a UI de "Aguardando"
   Widget _buildWaitingView(BuildContext context) {
-    // Usa uma Key para o AnimatedSwitcher identificar a mudança
     return Padding(
       key: const ValueKey('waiting'),
       padding: const EdgeInsets.all(24.0),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Indicador de progresso circular
           const CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(
-              Colors.white,
-            ), // Cor branca
-            strokeWidth: 3, // Espessura
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            strokeWidth: 3,
           ),
           const SizedBox(height: 32),
-          // Mensagem de status
           Text(
             _statusMessage,
             textAlign: TextAlign.center,
@@ -280,18 +329,24 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     );
   }
 
-  // Widget para a UI de "Inserir PIN"
+  /// Widget para a UI de "Inserir PIN"
   Widget _buildPinInputView(BuildContext context) {
-    // Usa uma Key para o AnimatedSwitcher identificar a mudança
+    // Formata o tempo restante em MM:SS
+    final String timeLeftFormatted =
+        '${_remainingTime.inMinutes.toString().padLeft(2, '0')}:${(_remainingTime.inSeconds % 60).toString().padLeft(2, '0')}';
+
+    // Condição para habilitar o botão de enviar e o campo do PIN
+    final bool canSubmit =
+        _pinController.text.length == 4 && _remainingTime.inSeconds > 0;
+    final bool isInputEnabled = _remainingTime.inSeconds > 0;
+
     return Padding(
       key: const ValueKey('pinInput'),
-      padding: const EdgeInsets.all(32.0), // Padding maior
+      padding: const EdgeInsets.all(32.0),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment:
-            CrossAxisAlignment.stretch, // Estica os filhos na largura
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Mensagem de instrução (ex: "Rodada X aberta, insira o PIN")
           Text(
             _statusMessage,
             textAlign: TextAlign.center,
@@ -301,65 +356,77 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 24),
-          // Campo de Texto para o PIN
+          const SizedBox(height: 16),
+          // --- NOVO: Exibe o timer da rodada ---
+          if (_currentRodadaName.isNotEmpty && _remainingTime.inSeconds > 0)
+            Column(
+              children: [
+                const Text(
+                  'Tempo restante:',
+                  style: TextStyle(fontSize: 18, color: Colors.white70),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  timeLeftFormatted,
+                  style: const TextStyle(
+                    fontSize: 64, // Tamanho grande para o timer
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    fontFeatures: [
+                      FontFeature.tabularFigures(),
+                    ], // Alinha os números
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          // --- FIM NOVO ---
           TextField(
             controller: _pinController,
-            maxLength: 4, // Limita a 4 dígitos
-            keyboardType: TextInputType.number, // Teclado numérico
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-            ], // Permite apenas dígitos
-            textAlign: TextAlign.center, // Centraliza o texto
-            autofocus: true, // Abre o teclado automaticamente
+            maxLength: 4,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            textAlign: TextAlign.center,
+            autofocus: true,
             style: const TextStyle(
-              // Estilo do texto digitado (grande, espaçado)
               fontSize: 48,
-              letterSpacing: 20, // Espaçamento entre dígitos
+              letterSpacing: 20,
               fontWeight: FontWeight.bold,
               color: Colors.black87,
             ),
             decoration: InputDecoration(
-              counterText: '', // Esconde o contador de caracteres (ex: 0/4)
-              hintText: '----', // Placeholder
-              hintStyle: TextStyle(
-                color: Colors.grey[400],
-                letterSpacing: 20,
-              ), // Estilo do placeholder
-              filled: true, // Habilita cor de fundo
-              fillColor: Colors.white.withOpacity(
-                0.9,
-              ), // Fundo branco semi-transparente
+              counterText: '',
+              hintText: '----',
+              hintStyle: TextStyle(color: Colors.grey[400], letterSpacing: 20),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.9),
               border: OutlineInputBorder(
-                // Bordas arredondadas sem linha visível
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide.none,
               ),
               focusedBorder: OutlineInputBorder(
-                // Borda quando focado
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide(
                   color: Theme.of(context).primaryColorDark,
                   width: 2,
-                ), // Borda mais escura
+                ),
               ),
-              contentPadding: const EdgeInsets.symmetric(
-                vertical: 20,
-              ), // Padding vertical
+              contentPadding: const EdgeInsets.symmetric(vertical: 20),
             ),
+            enabled:
+                isInputEnabled, // Desabilita o input se o tempo acabar (NOVO)
+            onSubmitted: (_) => _submitPin(), // Permite enviar com "enter"
           ),
           const SizedBox(height: 24),
-          // Botão de Enviar Presença
           ElevatedButton(
-            onPressed: _submitPin, // Chama a função para enviar o PIN
+            onPressed: canSubmit
+                ? _submitPin
+                : null, // Habilita/desabilita botão (NOVO)
             style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16), // Botão alto
-              backgroundColor: Colors.white, // Fundo branco
-              foregroundColor: Theme.of(
-                context,
-              ).primaryColor, // Texto na cor do tema
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              backgroundColor: Colors.white,
+              foregroundColor: Theme.of(context).primaryColor,
               shape: RoundedRectangleBorder(
-                // Bordas arredondadas
                 borderRadius: BorderRadius.circular(16),
               ),
             ),
