@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Para travar orientação
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/intl.dart'; // Para locale pt_BR
 import 'screens/role_selection_screen.dart'; // Tela inicial
 import 'package:flutter/foundation.dart'; // Para kDebugMode
 import 'package:logging/logging.dart';
-import 'package:google_fonts/google_fonts.dart'; // Importe o pacote
+import 'package:google_fonts/google_fonts.dart';
 
 Future<void> main() async {
   // Garante que os bindings do Flutter foram inicializados
@@ -20,7 +20,6 @@ Future<void> main() async {
   // Define o locale padrão para pt_BR (afeta formatação de datas/horas)
   Intl.defaultLocale = 'pt_BR';
 
-  // *** ADICIONE ESTA LINHA ***
   // Ativa o sistema de logging
   setupLogging();
 
@@ -28,19 +27,12 @@ Future<void> main() async {
 }
 
 void setupLogging() {
-  Logger.root.level = Level.ALL; // Define o nível mais baixo
+  Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
-    // Em modo debug, imprime tudo no console
     if (kDebugMode) {
       print(
         '${record.level.name}: ${record.time}: ${record.loggerName}: ${record.message}',
       );
-    }
-
-    // Em modo release (produção), você pode enviar logs de erro
-    // para um serviço como Firebase Crashlyrics ou Sentry.
-    if (kReleaseMode && record.level >= Level.SEVERE) {
-      // myCrashReportingService.logError(record.message, record.stackTrace);
     }
   });
 }
@@ -53,7 +45,7 @@ class SmartPresenceApp extends StatelessWidget {
     return MaterialApp(
       title: 'SmartPresence',
       theme: ThemeData(
-        // Tema principal com base em uma cor semente (Material 3)
+        // Tema principal com base em uma cor semente
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4A00E0)),
         useMaterial3: true,
         // Cor de fundo padrão para Scaffolds
@@ -63,8 +55,8 @@ class SmartPresenceApp extends StatelessWidget {
         // Estilo padrão para AppBar
         appBarTheme: AppBarTheme(
           backgroundColor: Colors.white,
-          foregroundColor: Colors.black87, // Cor do título e ícones
-          elevation: 1, // Pequena sombra
+          foregroundColor: Colors.black87,
+          elevation: 1,
           titleTextStyle: GoogleFonts.inter(
             // Estilo do título
             fontSize: 20,
@@ -74,21 +66,17 @@ class SmartPresenceApp extends StatelessWidget {
         ),
         // Estilo do texto geral
         textTheme: GoogleFonts.interTextTheme(Theme.of(context).textTheme),
-
-        // *** CORRIGIDO AQUI ***
-        // Deve ser CardThemeData, não CardTheme
         cardTheme: CardThemeData(
           elevation: 2,
           shadowColor: Colors.black.withOpacity(0.1),
           shape: RoundedRectangleBorder(
-            // Use o mesmo raio dos seus botões para consistência
             borderRadius: BorderRadius.circular(16.0),
           ),
           // Define uma margem padrão para os cards
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         ),
       ),
-      debugShowCheckedModeBanner: false, // Remove o banner de debug
+      debugShowCheckedModeBanner: false,
       // Configurações de localização para pt_BR
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,

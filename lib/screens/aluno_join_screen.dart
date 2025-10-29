@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:nsd/nsd.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'aluno_wait_screen.dart'; // Tela seguinte
+import 'aluno_wait_screen.dart';
 
 final _log = Logger('AlunoJoinScreen');
 
@@ -24,7 +24,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
   Discovery? _discovery; // Objeto de descoberta NSD
   WebSocketChannel? _channel; // Canal de comunicação WebSocket
 
-  // --- CONTROLES PARA DADOS DO ALUNO (NOVO) ---
+  // --- CONTROLES PARA DADOS DO ALUNO ---
   final _formKey = GlobalKey<FormState>(); // Chave para validar o formulário
   final TextEditingController _nomeController = TextEditingController();
   final TextEditingController _matriculaController = TextEditingController();
@@ -373,7 +373,6 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const SizedBox(height: 24),
-                // --- NOVOS CAMPOS DE TEXTO ---
                 TextFormField(
                   controller: _nomeController,
                   decoration: InputDecoration(
@@ -402,16 +401,14 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  keyboardType: TextInputType.number, // Teclado numérico
+                  keyboardType: TextInputType.number,
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Por favor, insira sua matrícula.';
                     }
-                    // Opcional: Adicionar validação de formato/tamanho da matrícula
                     return null;
                   },
                 ),
-                // --- FIM DOS NOVOS CAMPOS ---
                 const SizedBox(height: 48),
 
                 // Ícone de Status
@@ -452,7 +449,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                     ),
                   ),
 
-                const SizedBox(height: 20), // Espaço antes do botão manual
+                const SizedBox(height: 20),
                 // Botão para Conexão Manual (Plano B)
                 if (_statusIcon != Icons.check_circle_outline_rounded)
                   TextButton(

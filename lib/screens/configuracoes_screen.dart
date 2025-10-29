@@ -1,5 +1,3 @@
-// lib/screens/configuracoes_screen.dart
-
 import 'dart:convert'; // Para jsonEncode e jsonDecode
 import 'package:flutter/material.dart'; // Para Widgets Flutter
 import 'package:shared_preferences/shared_preferences.dart'; // Para persistência de dados
@@ -223,7 +221,7 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
                   suffixText: 'min',
                   prefixIcon: Icon(Icons.timer),
                 ),
-                keyboardType: TextInputType.number, // Permite apenas números
+                keyboardType: TextInputType.number,
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Por favor, insira a duração.';
@@ -243,11 +241,10 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
                     });
                   }
                 },
-                onFieldSubmitted: (_) =>
-                    _saveConfiguracoes(), // Salva ao submeter (pressionar Enter)
+                onFieldSubmitted: (_) => _saveConfiguracoes(),
               ),
               const SizedBox(height: 20), // Espaço entre os elementos
-              // --- Cabeçalho e botão para adicionar horários (COM CORREÇÃO DE OVERFLOW) ---
+              // --- Cabeçalho e botão para adicionar horários ---
               Row(
                 mainAxisAlignment:
                     MainAxisAlignment.spaceBetween, // Mantém o alinhamento
@@ -265,10 +262,6 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
                       onPressed: _addHorario,
                       icon: const Icon(Icons.add),
                       label: const Text('Adicionar Horário'),
-                      // Opcional: Ajustar padding se necessário
-                      // style: ElevatedButton.styleFrom(
-                      //   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      // ),
                     ),
                   ),
                 ],
@@ -328,7 +321,6 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
                                 onPressed: () => _removeHorario(horario),
                                 tooltip: 'Remover Horário',
                               ),
-                              // Adicionando onTap para editar o horário (opcional, mas útil)
                               onTap: () => _editHorario(index),
                               contentPadding: const EdgeInsets.symmetric(
                                 vertical: 8,

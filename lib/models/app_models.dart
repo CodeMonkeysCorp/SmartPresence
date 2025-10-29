@@ -1,5 +1,3 @@
-// lib/models/app_models.dart
-
 import 'package:flutter/material.dart'; // Para TimeOfDay
 import 'dart:io'; // Para WebSocket
 

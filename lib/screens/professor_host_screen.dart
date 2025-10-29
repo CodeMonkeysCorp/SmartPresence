@@ -1,5 +1,3 @@
-// lib/screens/professor_host_screen.dart
-
 import 'dart:async'; // Para Timer e Future
 import 'dart:convert'; // Para jsonEncode, jsonDecode e utf8
 import 'dart:io'; // Para HttpServer, WebSocket, HttpRequest, InternetAddress, HttpStatus
@@ -305,7 +303,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         _handleWebSocketRequest,
       ); // Ouve requisições HTTP e faz upgrade para WebSocket
 
-      // --- CORREÇÃO NSD: Encode string para Uint8List ---
+      // --- Encode string para Uint8List ---
       final Map<String, Uint8List?> txtData = {
         'ip': utf8.encode(
           _serverIp,
@@ -1082,9 +1080,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           centerTitle: false,
 
           // Reduz o espaçamento padrão ao redor do título para dar mais espaço
-          titleSpacing:
-              NavigationToolbar.kMiddleSpacing /
-              2, // Pode ajustar ou até usar 0
+          titleSpacing: NavigationToolbar.kMiddleSpacing / 2,
           // Usa Row + Expanded para maximizar o espaço do título
           title: Row(
             mainAxisAlignment: MainAxisAlignment.start,
@@ -1094,8 +1090,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                   'Painel do Professor',
                   overflow: TextOverflow.ellipsis, // Segurança contra overflow
                   maxLines: 1,
-                  // Opcional: Reduzir um pouco o tamanho da fonte se ainda não couber
-                  // style: TextStyle(fontSize: 18),
                 ),
               ),
             ],
@@ -1502,7 +1496,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
   }
 }
 
-// Extensão helper para firstWhereOrNull em iteráveis (Flutter 3.x já tem, mas mantido por compatibilidade)
+// Extensão helper para firstWhereOrNull em iteráveis
 extension IterableExtension<T> on Iterable<T> {
   T? firstWhereOrNull(bool Function(T) test) {
     for (var element in this) {
