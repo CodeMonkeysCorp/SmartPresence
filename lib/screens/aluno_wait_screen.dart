@@ -62,7 +62,12 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     _subscription?.cancel(); // Cancela a escuta do stream
     _rodadaTimer?.cancel(); // Cancela o timer da rodada, se estiver ativo
     _pinController.dispose(); // Limpa o controller do TextField
-    // O fechamento do widget.channel.sink é feito no onDone/onError do listener ou na tela anterior
+    // Fecha o canal WebSocket por segurança (pode já ter sido fechado em onDone/onError)
+    try {
+      widget.channel.sink.close();
+    } catch (e) {
+      _log.fine('Erro ao fechar channel.sink em dispose (ignorado): $e');
+    }
     super.dispose();
   }
 
@@ -187,8 +192,9 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
   /// --- Inicia o timer regressivo para a rodada atual ---
   void _startRodadaTimer() {
     _rodadaTimer?.cancel(); // Cancela qualquer timer anterior
-    if (_rodadaEndTime == null)
+    if (_rodadaEndTime == null) {
       return; // Não faz nada se não houver tempo de fim definido
+    }
 
     _rodadaTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted || _isDisposed) {
@@ -268,6 +274,7 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ignore: deprecated_member_use
     return WillPopScope(
       onWillPop: () async => false, // Impede o "voltar"
       child: Scaffold(
@@ -393,7 +400,7 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
               hintText: '----',
               hintStyle: TextStyle(color: Colors.grey[400], letterSpacing: 20),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.9),
+              fillColor: Colors.white.withAlpha((0.9 * 255).round()),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide.none,

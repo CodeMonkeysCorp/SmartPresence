@@ -1,3 +1,5 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'dart:async'; // Para Timer e Future
 import 'dart:convert'; // Para jsonEncode, jsonDecode e utf8
 import 'dart:io'; // Para HttpServer, WebSocket, HttpRequest, InternetAddress, HttpStatus
@@ -61,6 +63,19 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
   // Timer para forçar a atualização da UI a cada segundo, mostrando o tempo restante nas rodadas ativas
   Timer? _uiUpdateTimer;
 
+  // --- Estados para Antifraude: Rate Limiting de PIN ---
+  // Rastreia tentativas de PIN: "matricula_rodada" -> count de tentativas
+  // Estrutura: attemptKey -> { 'count': int, 'firstAt': int(millisecondsSinceEpoch) }
+  final Map<String, Map<String, int>> _pinAttempts = {};
+  static const int _maxPinAttempts = 3; // Máximo de tentativas por rodada
+  // Janela de bloqueio (10 minutos por padrão). Pode ser sobrescrita por SharedPreferences
+  int _pinWindowMillis = 10 * 60 * 1000;
+
+  // Chave para persistir tentativas de PIN no SharedPreferences
+  static const String _pinAttemptsKey = 'pin_attempts_v1';
+  // Chave opcional para configurar janela em minutos
+  static const String _pinWindowMinutesKey = 'pin_window_minutes';
+
   @override
   void initState() {
     super.initState();
@@ -95,6 +110,8 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
 
     // Carrega as configurações gerais (como a duração da rodada)
     await _loadConfiguracoesGerais();
+    // Carrega tentativas de PIN persistidas (se houver) e purga expiradas
+    await _loadPinAttempts();
     // Carrega os horários das rodadas definidos pelo professor
     await _loadRodadasFromPrefs();
     // Carrega o histórico de presenças e nomes de alunos
@@ -166,7 +183,59 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     // Obtém a duração da rodada salva, ou usa 5 minutos como padrão
     _duracaoRodadaMinutos =
         prefs.getInt(ConfiguracoesScreen.DURACAO_RODADA_KEY) ?? 5;
+    // Carrega configuração de janela de PIN (em minutos), se existir
+    final pinWindowMinutes = prefs.getInt(_pinWindowMinutesKey);
+    if (pinWindowMinutes != null && pinWindowMinutes > 0) {
+      _pinWindowMillis = pinWindowMinutes * 60 * 1000;
+      _log.info('Janela de PIN configurada para $pinWindowMinutes minutos.');
+    }
     _log.info("Duração da rodada configurada: $_duracaoRodadaMinutos minutos.");
+  }
+
+  /// Carrega tentativas de PIN salvas e remove entradas expiradas.
+  Future<void> _loadPinAttempts() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? raw = prefs.getString(_pinAttemptsKey);
+      if (raw == null || raw.isEmpty) return;
+      final Map<String, dynamic> decoded =
+          jsonDecode(raw) as Map<String, dynamic>;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      decoded.forEach((key, value) {
+        try {
+          if (value is Map) {
+            final count = (value['count'] ?? 0) as int;
+            final firstAt = (value['firstAt'] ?? 0) as int;
+            if (now - firstAt <= _pinWindowMillis) {
+              _pinAttempts[key] = {'count': count, 'firstAt': firstAt};
+            }
+          }
+        } catch (_) {
+          // ignore malformed entries
+        }
+      });
+      if (_pinAttempts.isNotEmpty) {
+        _log.info(
+          'Carregadas ${_pinAttempts.length} entradas de tentativas de PIN.',
+        );
+      }
+    } catch (e, s) {
+      _log.warning('Erro ao carregar tentativas de PIN persistidas', e, s);
+    }
+  }
+
+  /// Persiste as tentativas de PIN no SharedPreferences (assíncrono).
+  Future<void> _savePinAttempts() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final Map<String, dynamic> toSave = {};
+      _pinAttempts.forEach((k, v) {
+        toSave[k] = {'count': v['count'] ?? 0, 'firstAt': v['firstAt'] ?? 0};
+      });
+      await prefs.setString(_pinAttemptsKey, jsonEncode(toSave));
+    } catch (e, s) {
+      _log.warning('Erro ao salvar tentativas de PIN', e, s);
+    }
   }
 
   /// 3. Carrega o histórico de presenças e nomes dos alunos do SharedPreferences.
@@ -235,7 +304,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     final prefs = await SharedPreferences.getInstance();
 
     // Função auxiliar para converter string "HH:MM" para TimeOfDay
-    TimeOfDay? _timeFromPrefs(String? prefsString) {
+    TimeOfDay? timeFromPrefs(String? prefsString) {
       if (prefsString == null) return null;
       try {
         final parts = prefsString.split(':');
@@ -261,7 +330,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       try {
         final List<dynamic> horariosListaStrings = jsonDecode(horariosJson);
         List<TimeOfDay> horarios = horariosListaStrings
-            .map((timeStr) => _timeFromPrefs(timeStr as String))
+            .map((timeStr) => timeFromPrefs(timeStr as String))
             .whereType<TimeOfDay>() // Filtra nulos
             .toList();
 
@@ -453,27 +522,83 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       return true;
     }
     try {
-      final serverParts = serverIp.split('.');
-      final clientParts = clientIp.split('.');
-      if (serverParts.length != 4 || clientParts.length != 4) {
+      final serverAddr = InternetAddress.tryParse(serverIp);
+      final clientAddr = InternetAddress.tryParse(clientIp);
+      if (serverAddr == null || clientAddr == null) {
         _log.warning(
           'Verificação de sub-rede: IPs inválidos ($serverIp, $clientIp). Rejeitando.',
         );
         return false;
       }
-      // Compara os 3 primeiros octetos (ex: 192.168.1) para IPv4
-      bool isSame =
-          serverParts[0] == clientParts[0] &&
-          serverParts[1] == clientParts[1] &&
-          serverParts[2] == clientParts[2];
+      // Se ambos IPv4, compara primeira 3 partes (/24)
+      if (serverAddr.type == InternetAddressType.IPv4 &&
+          clientAddr.type == InternetAddressType.IPv4) {
+        final serverParts = serverIp.split('.');
+        final clientParts = clientIp.split('.');
+        if (serverParts.length != 4 || clientParts.length != 4) {
+          _log.warning(
+            'Verificação de sub-rede: formatos inesperados. Rejeitando.',
+          );
+          return false;
+        }
+        bool isSame =
+            serverParts[0] == clientParts[0] &&
+            serverParts[1] == clientParts[1] &&
+            serverParts[2] == clientParts[2];
+        _log.fine(
+          'Verificação de sub-rede: $serverIp vs $clientIp -> ${isSame ? "OK" : "REJEITADO"}',
+        );
+        return isSame;
+      }
+      // Para IPv6 ou misto, por ora não aplicar a verificação rígida (aceitar)
       _log.fine(
-        'Verificação de sub-rede: $serverIp vs $clientIp -> ${isSame ? "OK" : "REJEITADO"}',
+        'Verificação de sub-rede: Detected non-IPv4; pulando checagem rígida e permitindo (IPv6/Misto).',
       );
-      return isSame;
+      return true;
     } catch (e, s) {
       _log.severe('Erro ao verificar sub-rede', e, s);
       return false; // Falha segura
     }
+  }
+
+  /// Retorna o número de tentativas registradas para a chave, considerando a janela temporal.
+  int _getPinAttempts(String key) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final entry = _pinAttempts[key];
+    if (entry == null) return 0;
+    final firstAt = entry['firstAt'] ?? 0;
+    if (now - firstAt > _pinWindowMillis) {
+      _pinAttempts.remove(key);
+      return 0;
+    }
+    return entry['count'] ?? 0;
+  }
+
+  /// Registra uma tentativa de PIN (cria entrada com timestamp se for a primeira).
+  void _registerPinAttempt(String key) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final entry = _pinAttempts[key];
+    if (entry == null) {
+      _pinAttempts[key] = {'count': 1, 'firstAt': now};
+      _savePinAttempts();
+      return;
+    }
+    final firstAt = entry['firstAt'] ?? now;
+    if (now - firstAt > _pinWindowMillis) {
+      // Janela expirou: reinicia contador
+      _pinAttempts[key] = {'count': 1, 'firstAt': now};
+      _savePinAttempts();
+    } else {
+      entry['count'] = (entry['count'] ?? 0) + 1;
+      _pinAttempts[key] = entry;
+      _savePinAttempts();
+    }
+  }
+
+  /// Limpa o contador de tentativas para a chave.
+  void _clearPinAttempts(String key) {
+    _pinAttempts.remove(key);
+    _savePinAttempts();
   }
 
   /// 12. Inicia uma rodada específica (manual ou automática).
@@ -611,6 +736,21 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     _log.fine('Mensagem recebida de $alunoIp: $message');
     try {
       final data = jsonDecode(message as String);
+      // Validação básica do JSON: deve ser um objeto com campo 'command' string
+      if (data is! Map<String, dynamic> ||
+          data['command'] == null ||
+          data['command'] is! String) {
+        _log.warning('Mensagem JSON inválida de $alunoIp: $message');
+        if (socket.readyState == WebSocket.open) {
+          socket.add(
+            jsonEncode({
+              'command': 'ERROR',
+              'message': 'Mensagem JSON inválida.',
+            }),
+          );
+        }
+        return;
+      }
       final String command = data['command'];
 
       // Tenta encontrar o aluno na lista, se já estiver conectado
@@ -652,7 +792,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
             jsonEncode({
               'command': 'ERROR',
               'message':
-                  "Esta matrícula já está conectada em outro dispositivo.",
+                  "❌ Matrícula '$matricula' já está conectada em outro dispositivo. Desconecte o outro primeiro.",
             }),
           );
           socket.close(
@@ -728,10 +868,30 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
 
         _presencas[matricula] ??= {}; // Garante mapa de presença para o aluno
 
+        // --- ANTIFRAUDE: Rate Limiting de PIN com janela temporal ---
+        final attemptKey = "${matricula}_${rodadaNome}";
+        final int currentAttempts = _getPinAttempts(attemptKey);
+        if (currentAttempts >= _maxPinAttempts) {
+          _log.warning(
+            'BLOQUEADO (RATE LIMIT): Aluno ${aluno.nome} ($matricula) excedeu $_maxPinAttempts tentativas para $rodadaNome',
+          );
+          _presencas[matricula]![rodadaNome] = 'Falhou PIN';
+          _saveHistorico();
+          socket.add(
+            jsonEncode({
+              'command': 'PRESENCA_FALHA',
+              'message':
+                  'Você excedeu o número máximo de tentativas ($_maxPinAttempts) na janela de ${_pinWindowMillis / 60000} minutos. Tente novamente mais tarde.',
+            }),
+          );
+          return;
+        }
+        // --- FIM RATE LIMITING ---
+
         // --- ANTIFRAUDE: Verificação de Sub-rede ---
         if (!_isSameSubnet(alunoIp, _serverIp)) {
           _log.warning(
-            'REJEITADO (ANTIFRAUDE): Aluno ${aluno.nome} ($matricula) de $alunoIp fora da sub-rede (${_serverIp}).',
+            'REJEITADO (ANTIFRAUDE): Aluno ${aluno.nome} ($matricula) de $alunoIp fora da sub-rede ($_serverIp).',
           );
           _presencas[matricula]![rodadaNome] = 'Falhou PIN (Rede)';
           _saveHistorico();
@@ -756,6 +916,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           );
           _presencas[matricula]![rodadaAtiva.nome] =
               'Presente'; // Registra presença
+          _clearPinAttempts(attemptKey); // Limpa tentativas após sucesso
           _saveHistorico();
           socket.add(
             jsonEncode({'command': 'PRESENCA_OK', 'rodada': rodadaAtiva.nome}),
@@ -765,15 +926,19 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
               ? "Rodada não ativa ou nome inválido"
               : "PIN incorreto";
           _log.info(
-            'PIN Incorreto ou ${motivoFalha} do aluno ${aluno.nome} ($matricula) para $rodadaNome',
+            'PIN Incorreto ou $motivoFalha do aluno ${aluno.nome} ($matricula) para $rodadaNome',
           );
+          // Incrementa tentativa de PIN (registra timestamp na primeira tentativa)
+          _registerPinAttempt(attemptKey);
           _presencas[matricula]![rodadaNome] =
               'Falhou PIN'; // Marca como "Falhou PIN"
           _saveHistorico();
+          final tentativasRestantes = _maxPinAttempts - (currentAttempts + 1);
           socket.add(
             jsonEncode({
               'command': 'PRESENCA_FALHA',
-              'message': 'PIN incorreto ou rodada encerrada.',
+              'message':
+                  'PIN incorreto. Tentativas restantes: $tentativasRestantes',
             }),
           );
         }
@@ -890,13 +1055,15 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           WebSocketStatus.goingAway,
           "Servidor encerrando.",
         );
-        if (log)
+        if (log) {
           _log.info(
             "Conexão com ${client.nome} (${client.matricula}) fechada.",
           );
+        }
       } catch (e, s) {
-        if (log)
+        if (log) {
           _log.warning("Erro ao fechar socket do cliente ${client.nome}", e, s);
+        }
       }
     }
 
@@ -1037,6 +1204,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
   // --- UI ---
   @override
   Widget build(BuildContext context) {
+    // ignore: deprecated_member_use
     return WillPopScope(
       onWillPop: () async {
         if (_isServerRunning) {
@@ -1210,8 +1378,9 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         itemCount: _rodadas.length + 1, // +1 para o card da lista de clientes
         padding: const EdgeInsets.all(16),
         itemBuilder: (context, index) {
-          if (index == 0)
+          if (index == 0) {
             return _buildClientList(); // Primeiro item é o card da lista de clientes
+          }
           final rodada =
               _rodadas[index - 1]; // Demais itens são os cards das rodadas
           return _buildRodadaCard(rodada);
@@ -1309,7 +1478,9 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     Duration? remainingDuration;
 
     if (rodada.status == "Em Andamento") {
-      cardColor = Theme.of(context).primaryColor.withOpacity(0.05);
+      cardColor = Theme.of(
+        context,
+      ).primaryColor.withAlpha((0.05 * 255).round());
       accentColor = Theme.of(context).primaryColor;
       iconData = Icons.timer; // Ícone de timer quando em andamento
 
@@ -1460,9 +1631,14 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: accentColor.withOpacity(0.1), // Fundo bem sutil
+              color: accentColor.withAlpha(
+                (0.1 * 255).round(),
+              ), // Fundo bem sutil
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: accentColor.withOpacity(0.5), width: 1),
+              border: Border.all(
+                color: accentColor.withAlpha((0.5 * 255).round()),
+                width: 1,
+              ),
             ),
             child: Text(
               rodada.pin!,

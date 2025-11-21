@@ -1,8 +1,11 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:nsd/nsd.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'aluno_wait_screen.dart';
 
 final _log = Logger('AlunoJoinScreen');
@@ -74,8 +77,9 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
   // 1. Inicia a procura (NSD) pelo serviço do professor
   Future<void> _startDiscovery() async {
     // Não inicia se já estiver tentando conectar ou já conectado
-    if (_isConnecting || (_channel != null && _channel?.closeCode == null))
+    if (_isConnecting || (_channel != null && _channel?.closeCode == null)) {
       return;
+    }
 
     // Atualiza UI para estado "Procurando"
     setState(() {
@@ -83,6 +87,26 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
       _statusIcon = Icons.wifi_tethering;
       _statusColor = Colors.blueGrey;
     });
+
+    // Solicita permissão de localização necessária para descoberta via NSD
+    try {
+      final permissionStatus = await Permission.location.request();
+      if (!permissionStatus.isGranted) {
+        _log.warning('Permissão de localização negada pelo usuário.');
+        if (mounted) {
+          setState(() {
+            _statusMessage =
+                'Permissão de localização necessária para descobrir a sala. Forneça permissão e tente novamente.';
+            _statusIcon = Icons.error_outline_rounded;
+            _statusColor = Colors.red;
+          });
+        }
+        return;
+      }
+    } catch (e, s) {
+      _log.warning('Erro ao solicitar permissão de localização', e, s);
+      // Continua tentando discovery mesmo se a solicitação falhar aqui
+    }
 
     try {
       _discovery = await startDiscovery(
@@ -94,23 +118,27 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
         if (_discovery != null &&
             _discovery!.services.isNotEmpty &&
             !_isConnecting) {
-          final service = _discovery!.services.firstWhere(
-            (s) => s.name == 'smartpresence',
-            orElse: () => Service(
-              name: 'NotFound',
-              type: '',
-              host: '',
-              port: 0,
-            ), // Serviço dummy
-          );
-          if (service.name != 'NotFound') {
-            _log.info(
-              "Serviço 'smartpresence' encontrado via NSD: ${service.host}:${service.port}",
+          // Pega o primeiro serviço disponível do tipo esperado.
+          final services = _discovery!.services;
+          Service service = services.first;
+          try {
+            // Preferência por serviços que contenham o tipo ou nome esperado
+            service = services.firstWhere(
+              (s) =>
+                  s.type == '_smartpresence._tcp' ||
+                  (s.name != null &&
+                      s.name!.toLowerCase().contains('smartpresence')),
+              orElse: () => services.first,
             );
-            // ANTES de resolver, valida os campos
-            if (_validateStudentFields()) {
-              _resolveService(service); // Encontrou, tenta resolver e conectar
-            }
+          } catch (_) {
+            service = services.first;
+          }
+          _log.info(
+            "Serviço NSD encontrado: ${service.name} -> ${service.host ?? 'host?'}:${service.port}",
+          );
+          // ANTES de resolver, valida os campos
+          if (_validateStudentFields()) {
+            _resolveService(service); // Encontrou, tenta resolver e conectar
           }
         }
       });
@@ -200,7 +228,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
       return;
     }
 
-    final wsUrl = '$host:$port';
+    final wsUrl = 'ws://$host:$port';
     _log.info('Tentando conectar via WebSocket a: $wsUrl');
 
     setState(() {
@@ -211,6 +239,11 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
 
     try {
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+
+      // Capture o contexto e os valores necessários antes de usar após await/then
+      final ctx = context;
+      final nomeCapturado = _nomeController.text.trim();
+      final matriculaCapturada = _matriculaController.text.trim();
 
       _channel!.ready
           .then((_) {
@@ -225,18 +258,14 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
 
             Future.delayed(const Duration(milliseconds: 300), () {
               if (mounted && _channel != null) {
-                // Pega os dados dos controllers
-                final nome = _nomeController.text.trim();
-                final matricula = _matriculaController.text.trim();
-
                 Navigator.pushReplacement(
-                  context,
+                  ctx,
                   MaterialPageRoute(
                     // Passa o canal, nome e matrícula para a próxima tela
                     builder: (context) => AlunoWaitScreen(
                       channel: _channel!,
-                      nomeAluno: nome,
-                      matriculaAluno: matricula, // NOVO
+                      nomeAluno: nomeCapturado,
+                      matriculaAluno: matriculaCapturada,
                     ),
                   ),
                 );
@@ -316,8 +345,9 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                       final parts = text.split(':');
                       if (parts.length != 2 ||
                           parts[0].isEmpty ||
-                          parts[1].isEmpty)
+                          parts[1].isEmpty) {
                         throw FormatException();
+                      }
                       int.parse(parts[1]); // Tenta converter porta para int
                       Navigator.of(context).pop(text);
                     } catch (e) {

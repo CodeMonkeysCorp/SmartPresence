@@ -123,7 +123,7 @@ class _RoleButton extends StatelessWidget {
         ),
         textStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         elevation: 5,
-        shadowColor: Colors.black.withOpacity(0.2),
+        shadowColor: Colors.black.withAlpha((0.2 * 255).round()),
       ),
     );
   }
