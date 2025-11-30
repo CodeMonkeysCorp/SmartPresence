@@ -18,31 +18,25 @@ class AlunoJoinScreen extends StatefulWidget {
 }
 
 class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
-  // Variáveis de estado da UI
   String _statusMessage = 'Procurando sala do professor na rede...';
-  IconData _statusIcon = Icons.wifi_tethering_outlined; // Ícone inicial
+  IconData _statusIcon = Icons.wifi_tethering_outlined;
   Color _statusColor = Colors.grey[700]!;
 
-  // Objetos de rede
-  Discovery? _discovery; // Objeto de descoberta NSD
-  WebSocketChannel? _channel; // Canal de comunicação WebSocket
+  Discovery? _discovery;
+  WebSocketChannel? _channel;
 
-  // --- CONTROLES PARA DADOS DO ALUNO ---
-  final _formKey = GlobalKey<FormState>(); // Chave para validar o formulário
+  final _formKey = GlobalKey<FormState>();
   final TextEditingController _nomeController = TextEditingController();
   final TextEditingController _matriculaController = TextEditingController();
   final TextEditingController _ipController = TextEditingController();
 
-  // "Trava" para evitar múltiplas tentativas de conexão simultâneas
   bool _isConnecting = false;
 
   @override
   void initState() {
     super.initState();
-    // Atraso inicial para a UI carregar antes de iniciar a descoberta
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
-        // Verifica se a tela ainda existe
         _startDiscovery();
       }
     });
@@ -50,17 +44,14 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
 
   @override
   void dispose() {
-    _stopDiscovery(); // Garante que a descoberta pare ao sair
-    _channel?.sink.close(); // Fecha o canal WebSocket se estiver aberto
+    _stopDiscovery();
+    _channel?.sink.close();
     _ipController.dispose();
-    _nomeController.dispose(); // Limpa o controller
-    _matriculaController.dispose(); // Limpa o controller
+    _nomeController.dispose();
+    _matriculaController.dispose();
     super.dispose();
   }
 
-  // --- Lógica de Rede ---
-
-  // Valida os campos de nome e matrícula
   bool _validateStudentFields() {
     if (_formKey.currentState == null || !_formKey.currentState!.validate()) {
       _log.warning('Validação falhou. Nome ou Matrícula estão vazios.');
@@ -74,21 +65,17 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
     return true;
   }
 
-  // 1. Inicia a procura (NSD) pelo serviço do professor
   Future<void> _startDiscovery() async {
-    // Não inicia se já estiver tentando conectar ou já conectado
     if (_isConnecting || (_channel != null && _channel?.closeCode == null)) {
       return;
     }
 
-    // Atualiza UI para estado "Procurando"
     setState(() {
       _statusMessage = 'Procurando sala do professor na rede...';
       _statusIcon = Icons.wifi_tethering;
       _statusColor = Colors.blueGrey;
     });
 
-    // Solicita permissão de localização necessária para descoberta via NSD
     try {
       final permissionStatus = await Permission.location.request();
       if (!permissionStatus.isGranted) {
@@ -105,7 +92,6 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
       }
     } catch (e, s) {
       _log.warning('Erro ao solicitar permissão de localização', e, s);
-      // Continua tentando discovery mesmo se a solicitação falhar aqui
     }
 
     try {
@@ -118,11 +104,9 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
         if (_discovery != null &&
             _discovery!.services.isNotEmpty &&
             !_isConnecting) {
-          // Pega o primeiro serviço disponível do tipo esperado.
           final services = _discovery!.services;
           Service service = services.first;
           try {
-            // Preferência por serviços que contenham o tipo ou nome esperado
             service = services.firstWhere(
               (s) =>
                   s.type == '_smartpresence._tcp' ||
@@ -136,9 +120,8 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
           _log.info(
             "Serviço NSD encontrado: ${service.name} -> ${service.host ?? 'host?'}:${service.port}",
           );
-          // ANTES de resolver, valida os campos
           if (_validateStudentFields()) {
-            _resolveService(service); // Encontrou, tenta resolver e conectar
+            _resolveService(service);
           }
         }
       });
@@ -155,7 +138,6 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
     }
   }
 
-  // Para a procura NSD
   Future<void> _stopDiscovery() async {
     if (_discovery != null) {
       try {
@@ -172,19 +154,16 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
     }
   }
 
-  // 2. Resolve o serviço (obtém IP e Porta)
   Future<void> _resolveService(Service service) async {
-    // Trava para evitar múltiplas conexões
     if (_isConnecting) return;
 
-    // Valida novamente (segurança)
     if (!_validateStudentFields()) {
       _isConnecting = false;
       return;
     }
     _isConnecting = true;
 
-    await _stopDiscovery(); // Para de procurar outros
+    await _stopDiscovery();
 
     setState(() {
       _statusMessage =
@@ -194,17 +173,12 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
     });
 
     try {
-      final resolved = await resolve(
-        service,
-      ); // Resolve o serviço para obter IP/Host
+      final resolved = await resolve(service);
       if (resolved.host != null) {
         _log.info(
           'Serviço resolvido: Host: ${resolved.host}, Porta: ${resolved.port}',
         );
-        _connectToWebSocket(
-          resolved.host!,
-          resolved.port!,
-        ); // Conecta via WebSocket
+        _connectToWebSocket(resolved.host!, resolved.port!);
       } else {
         throw Exception('Endereço (host) não encontrado para o serviço.');
       }
@@ -215,14 +189,12 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
         _statusMessage = 'Falha ao obter detalhes da sala. Tente novamente.';
         _statusIcon = Icons.error_outline_rounded;
         _statusColor = Colors.red;
-        _isConnecting = false; // Libera trava
+        _isConnecting = false;
       });
     }
   }
 
-  // 3. Conecta ao WebSocket do professor (IP e Porta fornecidos)
   void _connectToWebSocket(String host, int port) {
-    // Valida os campos ANTES de conectar
     if (!_validateStudentFields()) {
       _isConnecting = false;
       return;
@@ -240,7 +212,6 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
     try {
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
 
-      // Capture o contexto e os valores necessários antes de usar após await/then
       final ctx = context;
       final nomeCapturado = _nomeController.text.trim();
       final matriculaCapturada = _matriculaController.text.trim();
@@ -261,7 +232,6 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                 Navigator.pushReplacement(
                   ctx,
                   MaterialPageRoute(
-                    // Passa o canal, nome e matrícula para a próxima tela
                     builder: (context) => AlunoWaitScreen(
                       channel: _channel!,
                       nomeAluno: nomeCapturado,
@@ -280,9 +250,9 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                   'Falha ao conectar. Verifique o IP/Porta ou a rede.';
               _statusIcon = Icons.error_outline_rounded;
               _statusColor = Colors.red;
-              _isConnecting = false; // Libera trava
+              _isConnecting = false;
             });
-            _channel = null; // Limpa o canal
+            _channel = null;
           });
     } catch (e, s) {
       _log.severe('Erro ao iniciar WebSocketChannel.connect', e, s);
@@ -291,20 +261,18 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
         _statusMessage = 'Endereço inválido ou erro inesperado.';
         _statusIcon = Icons.error_outline_rounded;
         _statusColor = Colors.red;
-        _isConnecting = false; // Libera trava
+        _isConnecting = false;
       });
       _channel = null;
     }
   }
 
-  // --- Diálogo para Inserção Manual de IP ---
   Future<void> _showManualIPDialog() async {
-    // Valida Nome e Matrícula ANTES de abrir o diálogo de IP
     if (!_validateStudentFields()) return;
 
-    await _stopDiscovery(); // Para a busca automática
-    _ipController.text = ""; // Limpa campo
-    _isConnecting = true; // Ativa trava para conexão manual
+    await _stopDiscovery();
+    _ipController.text = "";
+    _isConnecting = true;
 
     final String? ipPort = await showDialog<String>(
       context: context,
@@ -327,9 +295,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(
-                    context,
-                  ).pop(null), // Retorna null (cancelou)
+                  onPressed: () => Navigator.of(context).pop(null),
                   child: const Text('Cancelar'),
                 ),
                 ElevatedButton(
@@ -348,7 +314,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                           parts[1].isEmpty) {
                         throw FormatException();
                       }
-                      int.parse(parts[1]); // Tenta converter porta para int
+                      int.parse(parts[1]);
                       Navigator.of(context).pop(text);
                     } catch (e) {
                       setDialogState(() => errorText = 'IP ou Porta inválido');
@@ -368,7 +334,7 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
         final parts = ipPort.split(':');
         final host = parts[0];
         final port = int.parse(parts[1]);
-        _connectToWebSocket(host, port); // Tenta conectar com os dados manuais
+        _connectToWebSocket(host, port);
       } catch (e, s) {
         _log.severe("Erro ao processar IP manual", e, s);
         if (mounted) {
@@ -376,28 +342,24 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
             _statusMessage = 'Formato de IP:PORTA inválido.';
             _statusIcon = Icons.error_outline_rounded;
             _statusColor = Colors.red;
-            _isConnecting = false; // Libera trava
+            _isConnecting = false;
           });
         }
       }
     } else {
-      // Se o usuário cancelou o diálogo, reinicia a descoberta automática
-      _isConnecting = false; // Libera trava
+      _isConnecting = false;
       _startDiscovery();
     }
   }
 
-  // --- Construção da UI ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Entrar na Sala')),
       body: SingleChildScrollView(
-        // Permite rolagem se o teclado aparecer
         child: Padding(
-          padding: const EdgeInsets.all(24.0), // Padding geral
+          padding: const EdgeInsets.all(24.0),
           child: Form(
-            // Adiciona o Form para validação
             key: _formKey,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -440,12 +402,8 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                   },
                 ),
                 const SizedBox(height: 48),
-
-                // Ícone de Status
                 Icon(_statusIcon, size: 80, color: _statusColor),
                 const SizedBox(height: 32),
-
-                // Mensagem de Status
                 Text(
                   _statusMessage,
                   textAlign: TextAlign.center,
@@ -456,21 +414,17 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                   ),
                 ),
                 const SizedBox(height: 40),
-
-                // Indicador de Progresso (se procurando ou conectando)
                 if (_isConnecting ||
                     _statusIcon == Icons.wifi_tethering ||
                     _statusIcon == Icons.network_check_rounded ||
                     _statusIcon == Icons.power_settings_new_rounded)
                   const CircularProgressIndicator(),
-
-                // Botão Tentar Novamente (se ocorreu erro)
                 if (_statusIcon == Icons.error_outline_rounded &&
                     !_isConnecting)
                   ElevatedButton.icon(
                     icon: const Icon(Icons.refresh_rounded),
                     label: const Text('Tentar Descoberta Novamente'),
-                    onPressed: _startDiscovery, // Reinicia a busca automática
+                    onPressed: _startDiscovery,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 24,
@@ -478,12 +432,9 @@ class _AlunoJoinScreenState extends State<AlunoJoinScreen> {
                       ),
                     ),
                   ),
-
                 const SizedBox(height: 20),
-                // Botão para Conexão Manual (Plano B)
                 if (_statusIcon != Icons.check_circle_outline_rounded)
                   TextButton(
-                    // Desabilita o botão se já estiver conectando
                     onPressed: _isConnecting ? null : _showManualIPDialog,
                     child: const Text(
                       'Não está encontrando? Tentar conexão manual por IP',

@@ -1,53 +1,42 @@
-import 'dart:convert'; // Para jsonEncode e jsonDecode
-import 'package:flutter/material.dart'; // Para Widgets Flutter
-import 'package:shared_preferences/shared_preferences.dart'; // Para persistência de dados
-import 'package:logging/logging.dart'; // Para logging (depuração)
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:logging/logging.dart';
 
-// Configuração de logging para depuração
 final _log = Logger('ConfiguracoesScreen');
 
 class ConfiguracoesScreen extends StatefulWidget {
   const ConfiguracoesScreen({super.key});
 
-  // Chaves para SharedPreferences
   static const String HORARIOS_KEY = 'horarios_rodadas';
-  static const String DURACAO_RODADA_KEY =
-      'duracao_rodada_minutos'; // Chave para a duração da rodada
+  static const String DURACAO_RODADA_KEY = 'duracao_rodada_minutos';
 
   @override
   State<ConfiguracoesScreen> createState() => _ConfiguracoesScreenState();
 }
 
-// Classe de Estado para a tela de configurações
 class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
-  // Lista de horários das rodadas (TimeOfDay do Flutter)
   final List<TimeOfDay> _horarios = [];
-  // Chave para o formulário, usada para validação
   final _formKey = GlobalKey<FormState>();
 
-  // Duração padrão da rodada em minutos
   int _duracaoRodadaMinutos = 5;
-  // Controller para o campo de texto da duração da rodada
   final TextEditingController _duracaoController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _loadConfiguracoes(); // Carrega as configurações salvas ao iniciar a tela
+    _loadConfiguracoes();
   }
 
   @override
   void dispose() {
-    _duracaoController
-        .dispose(); // Libera o controller quando o widget é descartado
+    _duracaoController.dispose();
     super.dispose();
   }
 
-  /// Carrega os horários das rodadas e a duração da rodada do SharedPreferences.
   Future<void> _loadConfiguracoes() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // --- Carregar Horários das Rodadas ---
     final String? horariosJson = prefs.getString(
       ConfiguracoesScreen.HORARIOS_KEY,
     );
@@ -55,14 +44,13 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
       try {
         final List<dynamic> loadedHorarios = jsonDecode(horariosJson);
         setState(() {
-          _horarios.clear(); // Limpa a lista atual antes de carregar
+          _horarios.clear();
           for (var h in loadedHorarios) {
             final parts = (h as String).split(':');
             _horarios.add(
               TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1])),
             );
           }
-          // Garante que os horários estejam ordenados
           _horarios.sort((a, b) {
             if (a.hour != b.hour) return a.hour.compareTo(b.hour);
             return a.minute.compareTo(b.minute);
@@ -73,29 +61,22 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
         );
       } catch (e, s) {
         _log.severe("Erro ao carregar horários salvos", e, s);
-        // Em caso de erro, limpa a lista para evitar dados inválidos
         if (mounted) setState(() => _horarios.clear());
       }
     } else {
       _log.info("Nenhum horário salvo encontrado.");
     }
 
-    // --- Carregar Duração da Rodada ---
     _duracaoRodadaMinutos =
-        prefs.getInt(ConfiguracoesScreen.DURACAO_RODADA_KEY) ??
-        5; // Padrão de 5 minutos
-    _duracaoController.text = _duracaoRodadaMinutos
-        .toString(); // Atualiza o controller do campo de texto
+        prefs.getInt(ConfiguracoesScreen.DURACAO_RODADA_KEY) ?? 5;
+    _duracaoController.text = _duracaoRodadaMinutos.toString();
 
     _log.info("Duração da rodada carregada: $_duracaoRodadaMinutos minutos");
 
-    // Garante que a UI seja atualizada após o carregamento
     if (mounted) setState(() {});
   }
 
-  /// Salva os horários das rodadas e a duração da rodada no SharedPreferences.
   Future<void> _saveConfiguracoes() async {
-    // Valida o formulário antes de salvar
     if (!(_formKey.currentState?.validate() ?? false)) {
       _log.warning("Formulário inválido, não salvando configurações.");
       return;
@@ -103,7 +84,6 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
 
     final prefs = await SharedPreferences.getInstance();
 
-    // Salva horários das rodadas
     final List<String> horariosParaSalvar = _horarios
         .map((h) => '${h.hour}:${h.minute}')
         .toList();
@@ -113,14 +93,12 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
     );
     _log.info("Horários salvos: $horariosParaSalvar");
 
-    // Salva a duração da rodada
     await prefs.setInt(
       ConfiguracoesScreen.DURACAO_RODADA_KEY,
       _duracaoRodadaMinutos,
     );
     _log.info("Duração da rodada salva: $_duracaoRodadaMinutos minutos");
 
-    // Exibe uma SnackBar de sucesso
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Configurações salvas com sucesso!')),
@@ -128,44 +106,37 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
     }
   }
 
-  /// Abre o seletor de tempo para adicionar um novo horário de rodada.
   void _addHorario() async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
       builder: (BuildContext context, Widget? child) {
         return MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(alwaysUse24HourFormat: true), // Força formato 24h
+          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
           child: child!,
         );
       },
     );
 
     if (picked != null && mounted) {
-      // Verifica se o widget ainda está montado
       setState(() {
         _horarios.add(picked);
-        // Mantém a lista ordenada após adicionar um novo horário
         _horarios.sort((a, b) {
           if (a.hour != b.hour) return a.hour.compareTo(b.hour);
           return a.minute.compareTo(b.minute);
         });
       });
-      _saveConfiguracoes(); // Salva as configurações após adicionar o horário
+      _saveConfiguracoes();
     }
   }
 
-  /// Remove um horário de rodada da lista.
   void _removeHorario(TimeOfDay horario) {
     setState(() {
       _horarios.remove(horario);
     });
-    _saveConfiguracoes(); // Salva as configurações após remover o horário
+    _saveConfiguracoes();
   }
 
-  /// Edita um horário de rodada existente na lista.
   void _editHorario(int index) async {
     if (index < 0 || index >= _horarios.length) {
       _log.warning("Tentativa de editar horário com índice inválido: $index");
@@ -174,12 +145,10 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
 
     final TimeOfDay? picked = await showTimePicker(
       context: context,
-      initialTime: _horarios[index], // Usa o horário atual como inicial
+      initialTime: _horarios[index],
       builder: (BuildContext context, Widget? child) {
         return MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(alwaysUse24HourFormat: true), // Força formato 24h
+          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
           child: child!,
         );
       },
@@ -187,14 +156,13 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
 
     if (picked != null && mounted) {
       setState(() {
-        _horarios[index] = picked; // Atualiza o horário na posição existente
-        // Mantém a lista ordenada após a edição
+        _horarios[index] = picked;
         _horarios.sort((a, b) {
           if (a.hour != b.hour) return a.hour.compareTo(b.hour);
           return a.minute.compareTo(b.minute);
         });
       });
-      _saveConfiguracoes(); // Salva as configurações após a edição
+      _saveConfiguracoes();
       _log.info(
         "Horário na posição $index editado para ${picked.format(context)}",
       );
@@ -212,7 +180,6 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- Campo para definir a duração da rodada ---
               TextFormField(
                 controller: _duracaoController,
                 decoration: const InputDecoration(
@@ -233,7 +200,6 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
                   return null;
                 },
                 onChanged: (value) {
-                  // Atualiza a variável de estado '_duracaoRodadaMinutos' quando o texto muda
                   final int? duracao = int.tryParse(value);
                   if (duracao != null && duracao > 0) {
                     setState(() {
@@ -243,21 +209,16 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
                 },
                 onFieldSubmitted: (_) => _saveConfiguracoes(),
               ),
-              const SizedBox(height: 20), // Espaço entre os elementos
-              // --- Cabeçalho e botão para adicionar horários ---
+              const SizedBox(height: 20),
               Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.spaceBetween, // Mantém o alinhamento
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Texto à esquerda
                   const Text(
                     'Horários das Rodadas:  ',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  // Botão à direita, envolvido em Flexible(loose)
                   Flexible(
-                    fit: FlexFit
-                        .loose, // Permite que o botão tenha seu tamanho natural
+                    fit: FlexFit.loose,
                     child: ElevatedButton.icon(
                       onPressed: _addHorario,
                       icon: const Icon(Icons.add),
@@ -267,8 +228,6 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
                 ],
               ),
               const SizedBox(height: 10),
-
-              // --- Lista de horários de rodadas ---
               Expanded(
                 child: _horarios.isEmpty
                     ? const Center(
@@ -282,32 +241,31 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
                         itemCount: _horarios.length,
                         itemBuilder: (context, index) {
                           final horario = _horarios[index];
-                          // Gera o título dinamicamente usando o índice
                           final String tituloRodada = 'Rodada ${index + 1}';
 
                           return Card(
                             margin: const EdgeInsets.symmetric(
                               vertical: 6,
                               horizontal: 8,
-                            ), // Ajuste a margem se necessário
-                            elevation: 1, // Sombra suave
+                            ),
+                            elevation: 1,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
-                            ), // Bordas arredondadas
+                            ),
                             child: ListTile(
                               leading: Icon(
                                 Icons.access_time_filled,
                                 color: Theme.of(context).primaryColor,
-                              ), // Ícone de relógio
+                              ),
                               title: Text(
-                                tituloRodada, // <-- Título "Rodada X"
+                                tituloRodada,
                                 style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                               subtitle: Text(
-                                'Horário de início: ${horario.format(context)}', // <-- Subtítulo com o horário
+                                'Horário de início: ${horario.format(context)}',
                                 style: const TextStyle(
                                   fontSize: 14,
                                   color: Colors.black54,
@@ -317,7 +275,7 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
                                 icon: const Icon(
                                   Icons.delete_outline,
                                   color: Colors.red,
-                                ), // Ícone de lixeira (outline)
+                                ),
                                 onPressed: () => _removeHorario(horario),
                                 tooltip: 'Remover Horário',
                               ),
@@ -335,7 +293,6 @@ class _ConfiguracoesScreenState extends State<ConfiguracoesScreen> {
           ),
         ),
       ),
-      // Botão flutuante para salvar todas as configurações
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           _saveConfiguracoes();

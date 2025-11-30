@@ -1,17 +1,16 @@
-import 'dart:async'; // Para Timer
-import 'dart:convert'; // Para jsonEncode, jsonDecode
-import 'package:flutter/material.dart'; // Para Widgets Flutter
-import 'package:flutter/services.dart'; // Para HapticFeedback e FilteringTextInputFormatter
-import 'package:logging/logging.dart'; // Para logging
-import 'package:web_socket_channel/web_socket_channel.dart'; // Para WebSocketChannel
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:logging/logging.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 final _log = Logger('AlunoWaitScreen');
 
 class AlunoWaitScreen extends StatefulWidget {
-  final WebSocketChannel
-  channel; // Canal de comunicação WebSocket já estabelecido
-  final String nomeAluno; // Nome do aluno
-  final String matriculaAluno; // Matrícula do aluno
+  final WebSocketChannel channel;
+  final String nomeAluno;
+  final String matriculaAluno;
 
   const AlunoWaitScreen({
     super.key,
@@ -25,28 +24,23 @@ class AlunoWaitScreen extends StatefulWidget {
 }
 
 class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
-  // --- Estados da UI e Lógica ---
-  String _statusMessage =
-      'Entrando na sala...'; // Mensagem de status para o aluno
-  String _currentRodadaName = ''; // Nome da rodada de presença atualmente ativa
-  bool _showPinInput = false; // Controla se mostra o campo de PIN
+  String _statusMessage = 'Entrando na sala...';
+  String _currentRodadaName = '';
+  bool _showPinInput = false;
 
-  final TextEditingController _pinController =
-      TextEditingController(); // Controller do campo PIN
-  StreamSubscription? _subscription; // Para ouvir mensagens do servidor
-  bool _isDisposed = false; // Flag para evitar setState após dispose
+  final TextEditingController _pinController = TextEditingController();
+  StreamSubscription? _subscription;
+  bool _isDisposed = false;
 
-  // --- Estados para o timer e o fim da rodada ---
-  DateTime? _rodadaEndTime; // O momento em que a rodada atual deve terminar
-  Timer? _rodadaTimer; // Timer que atualiza o tempo restante a cada segundo
-  Duration _remainingTime = Duration.zero; // Duração restante para a rodada
+  DateTime? _rodadaEndTime;
+  Timer? _rodadaTimer;
+  Duration _remainingTime = Duration.zero;
 
   @override
   void initState() {
     super.initState();
-    _listenToServer(); // Começa a escutar por mensagens do servidor
+    _listenToServer();
 
-    // Envia a mensagem JOIN para se identificar ao servidor
     final joinMessage = jsonEncode({
       'command': 'JOIN',
       'nome': widget.nomeAluno,
@@ -58,11 +52,10 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
 
   @override
   void dispose() {
-    _isDisposed = true; // Marca como disposed
-    _subscription?.cancel(); // Cancela a escuta do stream
-    _rodadaTimer?.cancel(); // Cancela o timer da rodada, se estiver ativo
-    _pinController.dispose(); // Limpa o controller do TextField
-    // Fecha o canal WebSocket por segurança (pode já ter sido fechado em onDone/onError)
+    _isDisposed = true;
+    _subscription?.cancel();
+    _rodadaTimer?.cancel();
+    _pinController.dispose();
     try {
       widget.channel.sink.close();
     } catch (e) {
@@ -71,11 +64,10 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     super.dispose();
   }
 
-  /// Inicia a escuta por mensagens do servidor WebSocket.
   void _listenToServer() {
     _subscription = widget.channel.stream.listen(
       (message) {
-        if (_isDisposed) return; // Se a tela foi fechada, não faz nada
+        if (_isDisposed) return;
 
         _log.fine("Mensagem recebida do professor: $message");
         try {
@@ -89,47 +81,45 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                     "Você está na sala! Aguardando início das rodadas...";
                 break;
               case 'RODADA_ABERTA':
-                HapticFeedback.heavyImpact(); // Vibra o celular para avisar
+                HapticFeedback.heavyImpact();
                 _statusMessage =
                     data['message'] ?? 'Rodada iniciada! Insira o PIN.';
                 _currentRodadaName = data['nome'] ?? '';
                 _showPinInput = true;
                 _pinController.clear();
 
-                // --- Inicia o timer da rodada ---
                 final int? endTimeMillis = data['endTimeMillis'];
                 if (endTimeMillis != null) {
                   _rodadaEndTime = DateTime.fromMillisecondsSinceEpoch(
                     endTimeMillis,
                   );
-                  _startRodadaTimer(); // Inicia o timer regressivo
+                  _startRodadaTimer();
                 } else {
                   _log.warning('RODADA_ABERTA sem endTimeMillis.');
                 }
                 break;
               case 'RODADA_FECHADA':
-                HapticFeedback.mediumImpact(); // Vibra o celular para avisar
+                HapticFeedback.mediumImpact();
                 _statusMessage =
                     'A ${data['nome'] ?? 'rodada'} foi encerrada. Aguardando a próxima...';
                 _showPinInput = false;
                 _pinController.clear();
-                _currentRodadaName = ''; // Limpa a rodada ativa
-                _rodadaEndTime = null; // Reinicia o tempo da rodada
-                _rodadaTimer?.cancel(); // Cancela o timer da rodada
-                _remainingTime = Duration.zero; // Zera o tempo restante
+                _currentRodadaName = '';
+                _rodadaEndTime = null;
+                _rodadaTimer?.cancel();
+                _remainingTime = Duration.zero;
                 break;
               case 'PRESENCA_OK':
-                HapticFeedback.lightImpact(); // Vibração leve para sucesso
+                HapticFeedback.lightImpact();
                 _statusMessage =
                     'Presença confirmada para a ${data['rodada']}!';
-                _showPinInput = false; // Esconde o campo de PIN após sucesso
+                _showPinInput = false;
                 _pinController.clear();
                 break;
               case 'PRESENCA_FALHA':
-                HapticFeedback.vibrate(); // Vibração padrão para falha
+                HapticFeedback.vibrate();
                 _statusMessage =
                     data['message'] ?? 'PIN incorreto. Tente novamente.';
-                // _showPinInput permanece true para permitir nova tentativa
                 _pinController.clear();
                 break;
               case 'ERROR':
@@ -144,7 +134,6 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                 );
             }
           });
-          // Mostra SnackBar para feedback rápido ao usuário
           _showSnackBar(
             _statusMessage,
             isError: command == 'PRESENCA_FALHA' || command == 'ERROR',
@@ -160,11 +149,11 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
           setState(() {
             _statusMessage = 'Desconectado pelo professor. Você pode voltar.';
             _showPinInput = false;
-            _rodadaEndTime = null; // Reinicia o tempo da rodada
-            _rodadaTimer?.cancel(); // Cancela o timer da rodada
-            _remainingTime = Duration.zero; // Zera o tempo restante
+            _rodadaEndTime = null;
+            _rodadaTimer?.cancel();
+            _remainingTime = Duration.zero;
           });
-          Navigator.of(context).pop(); // Volta automaticamente
+          Navigator.of(context).pop();
         }
         widget.channel.sink.close();
       },
@@ -176,11 +165,11 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
             _statusMessage =
                 'Erro de conexão com o servidor. Tente entrar novamente.';
             _showPinInput = false;
-            _rodadaEndTime = null; // Reinicia o tempo da rodada
-            _rodadaTimer?.cancel(); // Cancela o timer da rodada
-            _remainingTime = Duration.zero; // Zera o tempo restante
+            _rodadaEndTime = null;
+            _rodadaTimer?.cancel();
+            _remainingTime = Duration.zero;
           });
-          Navigator.of(context).pop(); // Volta automaticamente
+          Navigator.of(context).pop();
         }
         widget.channel.sink.close();
       },
@@ -189,45 +178,42 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     _log.info("AlunoWaitScreen: Iniciou a escuta por mensagens do servidor.");
   }
 
-  /// --- Inicia o timer regressivo para a rodada atual ---
   void _startRodadaTimer() {
-    _rodadaTimer?.cancel(); // Cancela qualquer timer anterior
+    _rodadaTimer?.cancel();
     if (_rodadaEndTime == null) {
-      return; // Não faz nada se não houver tempo de fim definido
+      return;
     }
 
     _rodadaTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted || _isDisposed) {
-        timer
-            .cancel(); // Para o timer se o widget não estiver montado ou estiver sendo descartado
+        timer.cancel();
         return;
       }
       final now = DateTime.now();
-      final remaining = _rodadaEndTime!.difference(now); // Calcula a diferença
+      final remaining = _rodadaEndTime!.difference(now);
 
       if (remaining.isNegative || remaining.inSeconds <= 0) {
-        timer.cancel(); // Para o timer quando o tempo acaba
+        timer.cancel();
         setState(() {
-          _remainingTime = Duration.zero; // Zera o tempo
+          _remainingTime = Duration.zero;
           if (_currentRodadaName.isNotEmpty) {
             _statusMessage = 'Tempo esgotado para $_currentRodadaName.';
-            _currentRodadaName = ''; // Rodada acabou
+            _currentRodadaName = '';
           }
-          _showPinInput = false; // Esconde o campo de PIN
+          _showPinInput = false;
           _pinController.clear();
         });
-        HapticFeedback.lightImpact(); // Pequena vibração ao terminar
+        HapticFeedback.lightImpact();
         _log.info("Timer da rodada esgotado.");
       } else {
         setState(() {
-          _remainingTime = remaining; // Atualiza o tempo restante
+          _remainingTime = remaining;
         });
       }
     });
     _log.info("Timer da rodada iniciado. Fim em: $_rodadaEndTime");
   }
 
-  /// Envia o PIN digitado para o servidor.
   void _submitPin() {
     final pin = _pinController.text.trim();
     if (_currentRodadaName.isEmpty) {
@@ -235,12 +221,10 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       return;
     }
     if (pin.length != 4) {
-      // Valida se o PIN tem 4 dígitos
       _showSnackBar('O PIN deve ter exatamente 4 dígitos.', isError: true);
       return;
     }
     if (_remainingTime.inSeconds <= 0) {
-      // Verifica se o tempo ainda não acabou
       _showSnackBar('Tempo esgotado para enviar o PIN.', isError: true);
       return;
     }
@@ -254,19 +238,17 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
       }),
     );
     setState(() {
-      _statusMessage =
-          'Verificando PIN...'; // Atualiza UI para indicar que está verificando
+      _statusMessage = 'Verificando PIN...';
     });
   }
 
-  /// Exibe um SnackBar (notificação temporária) na parte inferior da tela.
   void _showSnackBar(String message, {bool isError = false}) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
           backgroundColor: isError ? Colors.red : Colors.green,
-          duration: const Duration(seconds: 3), // Duração padrão do SnackBar
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -274,16 +256,15 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ignore: deprecated_member_use
     return WillPopScope(
-      onWillPop: () async => false, // Impede o "voltar"
+      onWillPop: () async => false,
       child: Scaffold(
         appBar: AppBar(
           title: Text(
             _showPinInput ? 'Registre sua Presença!' : 'Sala de Espera',
             style: TextStyle(color: Colors.white),
           ),
-          automaticallyImplyLeading: false, // Esconde o botão de voltar padrão
+          automaticallyImplyLeading: false,
           backgroundColor: Theme.of(context).primaryColor,
           foregroundColor: Colors.white,
           elevation: 0,
@@ -304,7 +285,6 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     );
   }
 
-  /// Widget para a UI de "Aguardando"
   Widget _buildWaitingView(BuildContext context) {
     return Padding(
       key: const ValueKey('waiting'),
@@ -331,13 +311,10 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
     );
   }
 
-  /// Widget para a UI de "Inserir PIN"
   Widget _buildPinInputView(BuildContext context) {
-    // Formata o tempo restante em MM:SS
     final String timeLeftFormatted =
         '${_remainingTime.inMinutes.toString().padLeft(2, '0')}:${(_remainingTime.inSeconds % 60).toString().padLeft(2, '0')}';
 
-    // Condição para habilitar o botão de enviar e o campo do PIN
     final bool canSubmit =
         _pinController.text.length == 4 && _remainingTime.inSeconds > 0;
     final bool isInputEnabled = _remainingTime.inSeconds > 0;
@@ -359,7 +336,6 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          // --- Exibe o timer da rodada ---
           if (_currentRodadaName.isNotEmpty && _remainingTime.inSeconds > 0)
             Column(
               children: [
@@ -371,12 +347,10 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
                 Text(
                   timeLeftFormatted,
                   style: const TextStyle(
-                    fontSize: 64, // Tamanho grande para o timer
+                    fontSize: 64,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
-                    fontFeatures: [
-                      FontFeature.tabularFigures(),
-                    ], // Alinha os números
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -414,14 +388,12 @@ class _AlunoWaitScreenState extends State<AlunoWaitScreen> {
               ),
               contentPadding: const EdgeInsets.symmetric(vertical: 20),
             ),
-            enabled: isInputEnabled, // Desabilita o input se o tempo acabar
+            enabled: isInputEnabled,
             onSubmitted: (_) => _submitPin(),
           ),
           const SizedBox(height: 24),
           ElevatedButton(
-            onPressed: canSubmit
-                ? _submitPin
-                : null, // Habilita/desabilita botão
+            onPressed: canSubmit ? _submitPin : null,
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 16),
               backgroundColor: Colors.white,

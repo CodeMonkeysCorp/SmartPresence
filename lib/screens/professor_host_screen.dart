@@ -1,25 +1,23 @@
 // ignore_for_file: use_build_context_synchronously
 
-import 'dart:async'; // Para Timer e Future
-import 'dart:convert'; // Para jsonEncode, jsonDecode e utf8
-import 'dart:io'; // Para HttpServer, WebSocket, HttpRequest, InternetAddress, HttpStatus
-import 'dart:math'; // Para Random (geração de PIN)
-import 'dart:typed_data'; // Para Uint8List (necessário para NSD txt records)
-import 'package:flutter/material.dart'; // Para Widgets Flutter
-import 'package:nsd/nsd.dart'; // Para Network Service Discovery (publicação do serviço)
-import 'package:shared_preferences/shared_preferences.dart'; // Para persistência de dados
-import 'package:network_info_plus/network_info_plus.dart'; // Para obter o IP da rede local
-import 'package:intl/intl.dart'; // Para formatação de datas (exportação CSV)
-import 'package:logging/logging.dart'; // Para logging (depuração)
-import 'package:permission_handler/permission_handler.dart'; // Para permissões (exportação CSV)
-import 'package:path_provider/path_provider.dart'; // Para obter diretórios (exportação CSV)
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:nsd/nsd.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:network_info_plus/network_info_plus.dart';
+import 'package:intl/intl.dart';
+import 'package:logging/logging.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
 
-// Telas e modelos relacionados
-import 'configuracoes_screen.dart'; // Importa a tela de configurações para usar suas chaves
-import 'historico_screen.dart'; // Importa a tela de histórico
-import '../models/app_models.dart'; // Importa os modelos Rodada e AlunoConectado
+import 'configuracoes_screen.dart';
+import 'historico_screen.dart';
+import '../models/app_models.dart';
 
-// Configuração de logging para depuração
 final _log = Logger('ProfessorHostScreen');
 
 class ProfessorHostScreen extends StatefulWidget {
@@ -29,97 +27,74 @@ class ProfessorHostScreen extends StatefulWidget {
 }
 
 class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
-  // --- Estados do Servidor e da Aplicação ---
-  HttpServer?
-  _server; // Instância do servidor HTTP que gerencia as conexões WebSocket
-  final List<AlunoConectado> _clients =
-      []; // Lista de alunos conectados atualmente
-  String _serverStatus =
-      'Iniciando servidor...'; // Mensagem de status para a UI
-  bool _isServerRunning = false; // Indica se o servidor está ativo
-  int _port = 0; // Porta em que o servidor está escutando
-  String _serverIp =
-      "Aguardando IP..."; // Endereço IP do servidor na rede local
-  Registration? _registration; // Objeto para o registro do serviço NSD
+  HttpServer? _server;
+  final List<AlunoConectado> _clients = [];
+  String _serverStatus = 'Iniciando servidor...';
+  bool _isServerRunning = false;
+  int _port = 0;
+  String _serverIp = "Aguardando IP...";
+  Registration? _registration;
 
-  Timer?
-  _gameLoopTimer; // Timer para verificar periodicamente o estado das rodadas
-  List<Rodada> _rodadas = []; // Lista das rodadas de presença configuradas
-  bool _isLoading =
-      true; // Indica se a tela está em processo de inicialização/carregamento
+  Timer? _gameLoopTimer;
+  List<Rodada> _rodadas = [];
+  bool _isLoading = true;
 
-  Map<String, Map<String, String>> _presencas =
-      {}; // Mapa de presença: Matrícula -> Rodada -> Status
-  Map<String, String> _alunoNomes =
-      {}; // Mapa para armazenar o nome de cada aluno pela matrícula
-  static const String _historicoKey =
-      'historico_geral_presencas'; // Chave para SharedPreferences do histórico
+  Map<String, Map<String, String>> _presencas = {};
+  Map<String, String> _alunoNomes = {};
+  static const String _historicoKey = 'historico_geral_presencas';
 
-  // --- Novos Estados para Duração e Timer da Rodada ---
-  int _duracaoRodadaMinutos =
-      5; // Duração padrão de uma rodada, carregada das configurações
-  // Map para controlar o tempo de término (DateTime) de cada rodada que está "Em Andamento"
+  int _duracaoRodadaMinutos = 5;
   final Map<String, DateTime> _rodadaEndTimes = {};
-  // Timer para forçar a atualização da UI a cada segundo, mostrando o tempo restante nas rodadas ativas
   Timer? _uiUpdateTimer;
 
-  // --- Estados para Antifraude: Rate Limiting de PIN ---
-  // Rastreia tentativas de PIN: "matricula_rodada" -> count de tentativas
-  // Estrutura: attemptKey -> { 'count': int, 'firstAt': int(millisecondsSinceEpoch) }
   final Map<String, Map<String, int>> _pinAttempts = {};
-  static const int _maxPinAttempts = 3; // Máximo de tentativas por rodada
-  // Janela de bloqueio (10 minutos por padrão). Pode ser sobrescrita por SharedPreferences
-  int _pinWindowMillis = 10 * 60 * 1000;
+  static const int _maxPinAttempts = 3;
+  static const int _pinWindowMinutesDefault = 10;
+  static const int _millisPerMinute = 60 * 1000;
+  int _pinWindowMillis = _pinWindowMinutesDefault * _millisPerMinute;
 
-  // Chave para persistir tentativas de PIN no SharedPreferences
   static const String _pinAttemptsKey = 'pin_attempts_v1';
-  // Chave opcional para configurar janela em minutos
   static const String _pinWindowMinutesKey = 'pin_window_minutes';
+
+  static const double _cardOpacity = 0.05;
+  static const double _pinContainerOpacity = 0.1;
+  static const double _pinBorderOpacity = 0.5;
 
   @override
   void initState() {
     super.initState();
-    _initializeServer(); // Inicia o processo de configuração e servidor ao carregar a tela
+    _initializeServer();
   }
 
   @override
   void dispose() {
-    _stopServer(); // Garante que o servidor seja parado e recursos liberados
-    _uiUpdateTimer?.cancel(); // Cancela o timer de atualização da UI
+    _stopServer();
+    _uiUpdateTimer?.cancel();
     super.dispose();
   }
 
-  // --- Funções Principais de Lógica ---
-
-  /// 1. Inicializa o servidor WebSocket, carrega configurações, define o estado inicial das rodadas
-  /// e inicia os timers necessários.
+  /// Inicializa o servidor WebSocket, carrega configurações e define o estado inicial das rodadas.
   Future<void> _initializeServer() async {
     if (_isServerRunning) {
       _log.info("Servidor já está rodando. Ignorando _initializeServer.");
       return;
     }
 
-    // Define o estado inicial de carregamento para a UI
     setState(() {
       _isLoading = true;
       _serverStatus = 'Carregando configurações e iniciando servidor...';
       _serverIp = "Aguardando IP...";
       _port = 0;
-      _rodadaEndTimes.clear(); // Limpa quaisquer tempos de rodada anteriores
+      _rodadaEndTimes.clear();
     });
 
-    // Carrega as configurações gerais (como a duração da rodada)
     await _loadConfiguracoesGerais();
-    // Carrega tentativas de PIN persistidas (se houver) e purga expiradas
     await _loadPinAttempts();
-    // Carrega os horários das rodadas definidos pelo professor
     await _loadRodadasFromPrefs();
-    // Carrega o histórico de presenças e nomes de alunos
     await _loadHistorico();
 
-    if (!mounted) return; // Verifica se o widget ainda está ativo
+    if (!mounted) return;
 
-    // Se não houver rodadas configuradas, impede o início do servidor
     if (_rodadas.isEmpty) {
       setState(() {
         _serverStatus =
@@ -130,10 +105,8 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       return;
     }
 
-    // --- Define o status inicial correto de cada rodada com base na hora atual ---
-    final now = DateTime.now(); // Usa DateTime para cálculos precisos
+    final now = DateTime.now();
     for (var rodada in _rodadas) {
-      // Cria um DateTime para o início da rodada no dia atual
       final rodadaStartTimeToday = DateTime(
         now.year,
         now.month,
@@ -141,52 +114,43 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         rodada.horaInicio.hour,
         rodada.horaInicio.minute,
       );
-      // Calcula o DateTime para o fim da rodada, adicionando a duração configurada
       final rodadaEndTimeToday = rodadaStartTimeToday.add(
         Duration(minutes: _duracaoRodadaMinutos),
       );
 
       if (now.isAfter(rodadaEndTimeToday)) {
-        // Se a hora atual já passou do fim da rodada, marca como Encerrada
         rodada.status = "Encerrada";
         rodada.pin = null;
-        _rodadaEndTimes.remove(rodada.nome); // Remove do controle de tempo
+        _rodadaEndTimes.remove(rodada.nome);
       } else if (now.isAfter(rodadaStartTimeToday)) {
-        // Se a hora atual está entre o início e o fim, marca como Em Andamento
         rodada.status = "Em Andamento";
-        rodada.pin = _generatePin(); // Gera um PIN
-        _rodadaEndTimes[rodada.nome] =
-            rodadaEndTimeToday; // Armazena o tempo de término
+        rodada.pin = _generatePin();
+        _rodadaEndTimes[rodada.nome] = rodadaEndTimeToday;
       } else {
-        // Se a hora atual ainda não chegou ao início, marca como Aguardando
         rodada.status = "Aguardando";
         rodada.pin = null;
         _rodadaEndTimes.remove(rodada.nome);
       }
     }
 
-    await _startServer(); // Tenta iniciar o servidor WebSocket e anunciar via NSD
+    await _startServer();
 
-    // Se o servidor iniciou com sucesso, inicia os timers de lógica e UI
     if (_isServerRunning) {
       _startGameLoop();
       _startUiUpdateTimer();
     } else {
-      // Se o servidor não iniciou por algum motivo, garante que _isLoading seja false
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  /// 2. Carrega configurações gerais, como a duração padrão de uma rodada, do SharedPreferences.
+  /// Carrega configurações gerais, como a duração padrão de uma rodada, do SharedPreferences.
   Future<void> _loadConfiguracoesGerais() async {
     final prefs = await SharedPreferences.getInstance();
-    // Obtém a duração da rodada salva, ou usa 5 minutos como padrão
     _duracaoRodadaMinutos =
         prefs.getInt(ConfiguracoesScreen.DURACAO_RODADA_KEY) ?? 5;
-    // Carrega configuração de janela de PIN (em minutos), se existir
     final pinWindowMinutes = prefs.getInt(_pinWindowMinutesKey);
     if (pinWindowMinutes != null && pinWindowMinutes > 0) {
-      _pinWindowMillis = pinWindowMinutes * 60 * 1000;
+      _pinWindowMillis = pinWindowMinutes * _millisPerMinute;
       _log.info('Janela de PIN configurada para $pinWindowMinutes minutos.');
     }
     _log.info("Duração da rodada configurada: $_duracaoRodadaMinutos minutos.");
@@ -210,9 +174,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
               _pinAttempts[key] = {'count': count, 'firstAt': firstAt};
             }
           }
-        } catch (_) {
-          // ignore malformed entries
-        }
+        } catch (_) {}
       });
       if (_pinAttempts.isNotEmpty) {
         _log.info(
@@ -238,7 +200,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
   }
 
-  /// 3. Carrega o histórico de presenças e nomes dos alunos do SharedPreferences.
+  /// Carrega o histórico de presenças e nomes dos alunos do SharedPreferences.
   Future<void> _loadHistorico() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -247,12 +209,10 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       if (historicoJson != null && historicoJson.isNotEmpty) {
         final decodedData = jsonDecode(historicoJson) as Map<String, dynamic>;
 
-        // Carrega nomes dos alunos
         _alunoNomes = Map<String, String>.from(
           decodedData['nomes'] as Map? ?? {},
         );
 
-        // Carrega presenças
         final presencasBruto =
             decodedData['presencas'] as Map<String, dynamic>? ?? {};
         _presencas = presencasBruto.map(
@@ -280,7 +240,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     if (mounted) setState(() {});
   }
 
-  /// 4. Salva o histórico de presenças e nomes dos alunos no SharedPreferences.
+  /// Salva o histórico de presenças e nomes dos alunos no SharedPreferences.
   Future<void> _saveHistorico() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -299,11 +259,10 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
   }
 
-  /// 5. Carrega os horários das rodadas do SharedPreferences, definidas na tela de configurações.
+  /// Carrega os horários das rodadas do SharedPreferences, definidas na tela de configurações.
   Future<void> _loadRodadasFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Função auxiliar para converter string "HH:MM" para TimeOfDay
     TimeOfDay? timeFromPrefs(String? prefsString) {
       if (prefsString == null) return null;
       try {
@@ -331,16 +290,14 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         final List<dynamic> horariosListaStrings = jsonDecode(horariosJson);
         List<TimeOfDay> horarios = horariosListaStrings
             .map((timeStr) => timeFromPrefs(timeStr as String))
-            .whereType<TimeOfDay>() // Filtra nulos
+            .whereType<TimeOfDay>()
             .toList();
 
-        // Ordena os horários
         horarios.sort((a, b) {
           if (a.hour != b.hour) return a.hour.compareTo(b.hour);
           return a.minute.compareTo(b.minute);
         });
 
-        // Cria objetos Rodada
         _rodadas = horarios.asMap().entries.map((entry) {
           int index = entry.key;
           TimeOfDay time = entry.value;
@@ -355,38 +312,25 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     if (mounted) setState(() {});
   }
 
-  /// 6. Inicia o servidor HTTP e WebSocket e anuncia o serviço via NSD.
+  /// Inicia o servidor HTTP e WebSocket e anuncia o serviço via NSD.
   Future<void> _startServer() async {
     try {
       final info = NetworkInfo();
-      _serverIp =
-          (await info.getWifiIP()) ?? "127.0.0.1"; // Tenta obter o IP do Wi-Fi
+      _serverIp = (await info.getWifiIP()) ?? "127.0.0.1";
 
-      _server = await HttpServer.bind(
-        InternetAddress.anyIPv4,
-        0,
-      ); // Porta 0 = porta dinâmica
+      _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
       _port = _server!.port;
 
-      _server!.listen(
-        _handleWebSocketRequest,
-      ); // Ouve requisições HTTP e faz upgrade para WebSocket
+      _server!.listen(_handleWebSocketRequest);
 
-      // --- Encode string para Uint8List ---
-      final Map<String, Uint8List?> txtData = {
-        'ip': utf8.encode(
-          _serverIp,
-        ), // Converte a string IP para bytes para o registro NSD
-      };
+      final Map<String, Uint8List?> txtData = {'ip': utf8.encode(_serverIp)};
 
-      // Inicia a publicação NSD (Network Service Discovery)
       _registration = await register(
         Service(
-          name:
-              'SmartPresence-${_serverIp.split('.').last}', // Nome único para o serviço
-          type: '_smartpresence._tcp', // Tipo de serviço definido
+          name: 'SmartPresence-${_serverIp.split('.').last}',
+          type: '_smartpresence._tcp',
           port: _port,
-          txt: txtData, // Dados extras (IP) para o serviço
+          txt: txtData,
         ),
       );
       _log.info('Serviço SmartPresence anunciado na rede local (NSD).');
@@ -395,7 +339,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         setState(() {
           _isServerRunning = true;
           _serverStatus = 'Servidor rodando em: $_serverIp:$_port';
-          _isLoading = false; // Terminou de carregar/iniciar
+          _isLoading = false;
         });
       }
       _log.info('Servidor iniciado em: $_serverIp:$_port');
@@ -406,59 +350,51 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           _serverStatus =
               'Falha ao iniciar servidor: $e. Verifique permissões/rede.';
           _isServerRunning = false;
-          _isLoading = false; // Terminou de carregar/iniciar com erro
+          _isLoading = false;
         });
       }
-      await _stopServer(
-        log: false,
-      ); // Tenta parar o que foi iniciado, sem log redundante
+      await _stopServer(log: false);
     }
   }
 
-  /// 7. Inicia o loop de verificação periódica do estado das rodadas (a cada 10 segundos).
+  /// Inicia o loop de verificação periódica do estado das rodadas (a cada 10 segundos).
   void _startGameLoop() {
-    _gameLoopTimer?.cancel(); // Cancela qualquer timer anterior
+    _gameLoopTimer?.cancel();
     _log.info("Iniciando game loop (verificação de rodadas a cada 10s)...");
     _gameLoopTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       if (!mounted || !_isServerRunning) {
-        timer
-            .cancel(); // Para o timer se o widget não estiver montado ou servidor parado
+        timer.cancel();
         _gameLoopTimer = null;
         _log.info("Game loop parado.");
         return;
       }
-      _verificarRodadas(); // Chama a função de verificação
+      _verificarRodadas();
     });
   }
 
-  /// 8. Inicia um timer para atualizar a UI a cada segundo, mostrando o tempo restante nas rodadas ativas.
+  /// Inicia um timer para atualizar a interface a cada segundo, mostrando o tempo restante nas rodadas ativas.
   void _startUiUpdateTimer() {
-    _uiUpdateTimer?.cancel(); // Cancela qualquer timer anterior
+    _uiUpdateTimer?.cancel();
     _uiUpdateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
-        timer.cancel(); // Para o timer se o widget não estiver montado
+        timer.cancel();
         return;
       }
-      // Otimização: só chama setState se houver rodadas com timer para evitar reconstruções desnecessárias
       if (_rodadaEndTimes.isNotEmpty) {
-        setState(
-          () {},
-        ); // Força a reconstrução da UI para atualizar os timers nos cards
+        setState(() {});
       }
     });
   }
 
-  /// 9. Função centralizada para verificar o estado das rodadas e atualizar a UI.
+  /// Função centralizada para verificar o estado das rodadas e atualizar a interface.
   void _verificarRodadas() {
-    final now = DateTime.now(); // Hora atual com precisão de DateTime
+    final now = DateTime.now();
     _log.fine(
       'Verificando rodadas... Hora atual: ${DateFormat('HH:mm:ss').format(now)}',
     );
 
-    bool changed =
-        false; // Flag para indicar se houve alguma mudança que exija setState
+    bool changed = false;
     for (var rodada in _rodadas) {
-      // Cria um DateTime para o início da rodada no dia atual
       final rodadaStartTimeToday = DateTime(
         now.year,
         now.month,
@@ -466,41 +402,28 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         rodada.horaInicio.hour,
         rodada.horaInicio.minute,
       );
-      // Calcula o DateTime para o fim da rodada, adicionando a duração configurada
       final rodadaEndTimeToday = rodadaStartTimeToday.add(
         Duration(minutes: _duracaoRodadaMinutos),
       );
 
-      // Lógica para iniciar a rodada:
-      // Se a rodada está aguardando, a hora atual é depois do início E antes do fim
       if (rodada.status == "Aguardando" &&
           now.isAfter(rodadaStartTimeToday) &&
           now.isBefore(rodadaEndTimeToday)) {
         _log.info('--> Hora de INICIAR ${rodada.nome}');
-        _startRodada(
-          rodada,
-          rodadaEndTimeToday,
-        ); // Passa o tempo de fim calculado
+        _startRodada(rodada, rodadaEndTimeToday);
         changed = true;
-      }
-      // Lógica para encerrar a rodada:
-      // Se a rodada está em andamento e a hora atual é depois ou igual ao fim
-      else if (rodada.status == "Em Andamento" &&
+      } else if (rodada.status == "Em Andamento" &&
           now.isAfter(rodadaEndTimeToday)) {
         _log.info('--> Hora de ENCERRAR ${rodada.nome} (por tempo)');
         _endRodada(rodada);
         changed = true;
-      }
-      // Caso uma rodada esteja 'Aguardando' mas a hora já passou do seu tempo de encerramento
-      // (ex: o app foi aberto tarde e a rodada deveria ter começado e terminado)
-      else if (rodada.status == "Aguardando" &&
+      } else if (rodada.status == "Aguardando" &&
           now.isAfter(rodadaEndTimeToday)) {
         if (mounted) {
           setState(() {
-            // Atualiza diretamente para Encerrada
             rodada.status = "Encerrada";
             rodada.pin = null;
-            _rodadaEndTimes.remove(rodada.nome); // Remove do controle de tempo
+            _rodadaEndTimes.remove(rodada.nome);
             _log.info(
               '--> Rodada ${rodada.nome} já expirou ao ser verificada. Marcando como Encerrada.',
             );
@@ -509,13 +432,16 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         changed = true;
       }
     }
-    if (changed && mounted) setState(() {}); // Atualiza a UI se houver mudanças
+    if (changed && mounted) setState(() {});
   }
 
-  /// 10. Gera um PIN aleatório de 4 dígitos.
-  String _generatePin() => (1000 + Random().nextInt(9000)).toString();
+  /// Gera um PIN aleatório de 4 dígitos.
+  static const int _pinMin = 1000;
+  static const int _pinMax = 9999;
+  static const int _pinRange = _pinMax - _pinMin + 1;
+  String _generatePin() => (_pinMin + Random().nextInt(_pinRange)).toString();
 
-  /// 11. Verifica se o IP do cliente está na mesma sub-rede do servidor (antifraude).
+  /// Verifica se o IP do cliente está na mesma sub-rede do servidor (antifraude).
   bool _isSameSubnet(String clientIp, String serverIp) {
     if (clientIp == "127.0.0.1" || serverIp == "127.0.0.1") {
       _log.fine('Verificação de sub-rede: Permitindo localhost.');
@@ -530,7 +456,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         );
         return false;
       }
-      // Se ambos IPv4, compara primeira 3 partes (/24)
       if (serverAddr.type == InternetAddressType.IPv4 &&
           clientAddr.type == InternetAddressType.IPv4) {
         final serverParts = serverIp.split('.');
@@ -550,14 +475,13 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         );
         return isSame;
       }
-      // Para IPv6 ou misto, por ora não aplicar a verificação rígida (aceitar)
       _log.fine(
-        'Verificação de sub-rede: Detected non-IPv4; pulando checagem rígida e permitindo (IPv6/Misto).',
+        'Verificação de sub-rede: Detectado não-IPv4; pulando checagem rígida e permitindo (IPv6/Misto).',
       );
       return true;
     } catch (e, s) {
       _log.severe('Erro ao verificar sub-rede', e, s);
-      return false; // Falha segura
+      return false;
     }
   }
 
@@ -574,7 +498,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     return entry['count'] ?? 0;
   }
 
-  /// Registra uma tentativa de PIN (cria entrada com timestamp se for a primeira).
+  /// Registra uma tentativa de PIN (cria entrada com data/hora se for a primeira).
   void _registerPinAttempt(String key) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final entry = _pinAttempts[key];
@@ -585,7 +509,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
     final firstAt = entry['firstAt'] ?? now;
     if (now - firstAt > _pinWindowMillis) {
-      // Janela expirou: reinicia contador
       _pinAttempts[key] = {'count': 1, 'firstAt': now};
       _savePinAttempts();
     } else {
@@ -601,7 +524,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     _savePinAttempts();
   }
 
-  /// 12. Inicia uma rodada específica (manual ou automática).
+  /// Inicia uma rodada específica (manual ou automática).
   /// Recebe um `forcedEndTime` para garantir que o tempo de término seja consistente.
   void _startRodada(Rodada rodada, DateTime? forcedEndTime) {
     if (!_isServerRunning) {
@@ -626,27 +549,23 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         rodada.status = "Em Andamento";
         rodada.pin = _generatePin();
 
-        // Calcula o tempo de término: usa o fornecido ou calcula um novo
         final endTime =
             forcedEndTime ??
             DateTime.now().add(Duration(minutes: _duracaoRodadaMinutos));
-        _rodadaEndTimes[rodada.nome] =
-            endTime; // Armazena para controle da UI do professor
+        _rodadaEndTimes[rodada.nome] = endTime;
 
-        // Envia mensagem de RODADA_ABERTA para os alunos, incluindo o timestamp do fim da rodada
         _broadcastMessage({
           'command': 'RODADA_ABERTA',
           'nome': rodada.nome,
           'message': 'A ${rodada.nome} está aberta! Insira o PIN.',
-          'endTimeMillis':
-              endTime.millisecondsSinceEpoch, // Timestamp em milissegundos
+          'endTimeMillis': endTime.millisecondsSinceEpoch,
         });
       });
     }
     _showSnackBar("Rodada ${rodada.nome} iniciada.", isError: false);
   }
 
-  /// 13. Encerra uma rodada específica (manual ou automática).
+  /// Encerra uma rodada específica (manual ou automática).
   void _endRodada(Rodada rodada) {
     if (!_isServerRunning) {
       _log.warning(
@@ -665,16 +584,12 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       setState(() {
         rodada.status = "Encerrada";
         rodada.pin = null;
-        _rodadaEndTimes.remove(rodada.nome); // Remove do controle de tempo
+        _rodadaEndTimes.remove(rodada.nome);
 
-        // Marca alunos que não submeteram presença como "Ausente" para esta rodada
-        final List<AlunoConectado> currentClients = List.from(
-          _clients,
-        ); // Cria uma cópia para evitar problemas de iteração
+        final List<AlunoConectado> currentClients = List.from(_clients);
         for (var aluno in currentClients) {
           final matricula = aluno.matricula;
-          _presencas[matricula] ??=
-              {}; // Garante que o mapa de presença do aluno exista
+          _presencas[matricula] ??= {};
           if (!_presencas[matricula]!.containsKey(rodada.nome)) {
             _presencas[matricula]![rodada.nome] = 'Ausente';
             _log.info(
@@ -682,15 +597,14 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
             );
           }
         }
-        _saveHistorico(); // Salva o histórico após marcar as ausências
+        _saveHistorico();
       });
     }
-    // Envia mensagem de RODADA_FECHADA para os alunos
     _broadcastMessage({'command': 'RODADA_FECHADA', 'nome': rodada.nome});
     _showSnackBar("Rodada ${rodada.nome} encerrada.", isError: false);
   }
 
-  /// 14. Lida com novas solicitações HTTP, fazendo upgrade para WebSocket se for o caso.
+  /// Lida com novas solicitações HTTP, fazendo atualização para WebSocket se for o caso.
   Future<void> _handleWebSocketRequest(HttpRequest request) async {
     if (WebSocketTransformer.isUpgradeRequest(request)) {
       final String clientIp =
@@ -713,7 +627,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
             );
             _removeClient(socket);
           },
-          cancelOnError: true, // Cancela a inscrição em caso de erro
+          cancelOnError: true,
         );
       } catch (e, s) {
         _log.severe("Erro ao fazer upgrade para WebSocket", e, s);
@@ -721,7 +635,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         request.response.close();
       }
     } else {
-      // Rejeita requisições que não são de upgrade para WebSocket
       request.response
         ..statusCode = HttpStatus.forbidden
         ..write(
@@ -731,12 +644,11 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
   }
 
-  /// 15. Lida com mensagens recebidas dos clientes WebSocket.
+  /// Lida com mensagens recebidas dos clientes WebSocket.
   void _handleClientMessage(WebSocket socket, dynamic message, String alunoIp) {
     _log.fine('Mensagem recebida de $alunoIp: $message');
     try {
       final data = jsonDecode(message as String);
-      // Validação básica do JSON: deve ser um objeto com campo 'command' string
       if (data is! Map<String, dynamic> ||
           data['command'] == null ||
           data['command'] is! String) {
@@ -753,7 +665,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       }
       final String command = data['command'];
 
-      // Tenta encontrar o aluno na lista, se já estiver conectado
       int clientIndex = _clients.indexWhere((c) => c.socket == socket);
       AlunoConectado? aluno = (clientIndex != -1)
           ? _clients[clientIndex]
@@ -780,7 +691,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           return;
         }
 
-        // Verifica se matrícula já está conectada por OUTRO socket
         int existingMatriculaIndex = _clients.indexWhere(
           (c) => c.matricula == matricula && c.socket != socket,
         );
@@ -802,7 +712,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           return;
         }
 
-        // Cria ou atualiza o objeto AlunoConectado
         aluno = AlunoConectado(
           socket: socket,
           nome: nome,
@@ -812,33 +721,29 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         );
 
         if (clientIndex == -1) {
-          // Novo cliente
           if (mounted) {
             setState(() {
               _clients.add(aluno!);
-              _presencas[matricula] ??=
-                  {}; // Garante mapa de presença para o aluno
-              _alunoNomes[matricula] = nome; // Salva/Atualiza nome do aluno
+              _presencas[matricula] ??= {};
+              _alunoNomes[matricula] = nome;
             });
-            _saveHistorico(); // Salva o novo aluno/nome
+            _saveHistorico();
             _log.info(
               "Aluno $nome ($matricula) conectado ($alunoIp) e adicionado.",
             );
           }
         } else {
-          // Cliente reconectando ou atualizando nome
           if (mounted) {
             setState(() {
-              _clients[clientIndex] = aluno!; // Atualiza objeto na lista
-              _alunoNomes[matricula] = nome; // Atualiza nome se mudou
+              _clients[clientIndex] = aluno!;
+              _alunoNomes[matricula] = nome;
             });
-            _saveHistorico(); // Salva caso nome tenha mudado
+            _saveHistorico();
             _log.info(
               "Aluno $nome ($matricula) reconectado/atualizado ($alunoIp).",
             );
           }
         }
-        // Confirma ao aluno que a conexão foi bem-sucedida
         socket.add(
           jsonEncode({
             'command': 'JOIN_SUCCESS',
@@ -861,15 +766,13 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         final String rodadaNome = data['rodada'] ?? '';
         final matricula = aluno.matricula;
 
-        // Encontra a rodada ativa com o nome fornecido
         final rodadaAtiva = _rodadas.firstWhereOrNull(
           (r) => r.nome == rodadaNome && r.status == "Em Andamento",
         );
 
-        _presencas[matricula] ??= {}; // Garante mapa de presença para o aluno
+        _presencas[matricula] ??= {};
 
-        // --- ANTIFRAUDE: Rate Limiting de PIN com janela temporal ---
-        final attemptKey = "${matricula}_${rodadaNome}";
+        final attemptKey = "${matricula}_$rodadaNome";
         final int currentAttempts = _getPinAttempts(attemptKey);
         if (currentAttempts >= _maxPinAttempts) {
           _log.warning(
@@ -881,14 +784,12 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
             jsonEncode({
               'command': 'PRESENCA_FALHA',
               'message':
-                  'Você excedeu o número máximo de tentativas ($_maxPinAttempts) na janela de ${_pinWindowMillis / 60000} minutos. Tente novamente mais tarde.',
+                  'Você excedeu o número máximo de tentativas ($_maxPinAttempts) na janela de ${_pinWindowMillis / _millisPerMinute} minutos. Tente novamente mais tarde.',
             }),
           );
           return;
         }
-        // --- FIM RATE LIMITING ---
 
-        // --- ANTIFRAUDE: Verificação de Sub-rede ---
         if (!_isSameSubnet(alunoIp, _serverIp)) {
           _log.warning(
             'REJEITADO (ANTIFRAUDE): Aluno ${aluno.nome} ($matricula) de $alunoIp fora da sub-rede ($_serverIp).',
@@ -907,16 +808,13 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         _log.fine(
           'APROVADO (ANTIFRAUDE): Aluno ${aluno.nome} ($matricula) de $alunoIp na mesma sub-rede.',
         );
-        // --- FIM ANTIFRAUDE ---
 
-        // Verifica se a rodada está ativa e o PIN está correto
         if (rodadaAtiva != null && pinEnviado == rodadaAtiva.pin) {
           _log.info(
             'PIN Correto do aluno ${aluno.nome} ($matricula) para ${rodadaAtiva.nome}',
           );
-          _presencas[matricula]![rodadaAtiva.nome] =
-              'Presente'; // Registra presença
-          _clearPinAttempts(attemptKey); // Limpa tentativas após sucesso
+          _presencas[matricula]![rodadaAtiva.nome] = 'Presente';
+          _clearPinAttempts(attemptKey);
           _saveHistorico();
           socket.add(
             jsonEncode({'command': 'PRESENCA_OK', 'rodada': rodadaAtiva.nome}),
@@ -928,10 +826,8 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           _log.info(
             'PIN Incorreto ou $motivoFalha do aluno ${aluno.nome} ($matricula) para $rodadaNome',
           );
-          // Incrementa tentativa de PIN (registra timestamp na primeira tentativa)
           _registerPinAttempt(attemptKey);
-          _presencas[matricula]![rodadaNome] =
-              'Falhou PIN'; // Marca como "Falhou PIN"
+          _presencas[matricula]![rodadaNome] = 'Falhou PIN';
           _saveHistorico();
           final tentativasRestantes = _maxPinAttempts - (currentAttempts + 1);
           socket.add(
@@ -955,7 +851,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         s,
       );
       if (socket.readyState == WebSocket.open) {
-        // Tenta enviar o erro de volta se o socket estiver aberto
         socket.add(
           jsonEncode({
             'command': 'ERROR',
@@ -966,7 +861,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
   }
 
-  /// 16. Remove um cliente da lista de clientes conectados.
+  /// Remove um cliente da lista de clientes conectados.
   void _removeClient(WebSocket socket) {
     final index = _clients.indexWhere((c) => c.socket == socket);
     if (index != -1) {
@@ -984,11 +879,10 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
   }
 
-  /// 17. Envia uma mensagem JSON para todos os clientes conectados.
+  /// Envia uma mensagem JSON para todos os clientes conectados.
   void _broadcastMessage(Map<String, dynamic> message) {
     final jsonMessage = jsonEncode(message);
     _log.fine("Enviando broadcast: $jsonMessage");
-    // Cria uma cópia da lista para evitar modificação durante a iteração (se um cliente se desconectar)
     final List<AlunoConectado> clientsCopy = List.from(_clients);
     int sentCount = 0;
     for (var client in clientsCopy) {
@@ -1000,7 +894,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           _log.fine(
             "Socket para ${client.nome} não estava aberto. Removendo silenciosamente.",
           );
-          _removeClient(client.socket); // Remove clientes com sockets fechados
+          _removeClient(client.socket);
         }
       } catch (e, s) {
         _log.warning(
@@ -1012,14 +906,13 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       }
     }
     if (sentCount > 0 || clientsCopy.isEmpty) {
-      // Log mais preciso
       _log.info("Broadcast enviado para $sentCount clientes ativos.");
     } else {
       _log.info("Nenhum cliente ativo para receber broadcast.");
     }
   }
 
-  /// 18. Desliga completamente o servidor, incluindo WebSocket, NSD e clientes conectados.
+  /// Desliga completamente o servidor, incluindo WebSocket, NSD e clientes conectados.
   Future<void> _stopServer({bool log = true}) async {
     if (!_isServerRunning && log) {
       _log.info("Tentativa de parar servidor que já está parado.");
@@ -1027,14 +920,14 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
     if (log) _log.info("Iniciando processo de parada do servidor...");
 
-    _gameLoopTimer?.cancel(); // Cancela o timer de lógica do jogo
+    _gameLoopTimer?.cancel();
     _gameLoopTimer = null;
-    _uiUpdateTimer?.cancel(); // Cancela o timer de atualização da UI
+    _uiUpdateTimer?.cancel();
     _uiUpdateTimer = null;
 
     if (_registration != null) {
       try {
-        await unregister(_registration!); // Desregistra o serviço NSD
+        await unregister(_registration!);
         if (log) _log.info("Serviço NSD cancelado com sucesso.");
       } catch (e, s) {
         if (log) _log.warning("Erro ao cancelar registro NSD", e, s);
@@ -1043,12 +936,9 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
 
     if (log) _log.info("Fechando conexões de ${_clients.length} clientes...");
-    final List<AlunoConectado> clientsToClose = List.from(
-      _clients,
-    ); // Copia a lista
-    _clients.clear(); // Limpa a lista principal
+    final List<AlunoConectado> clientsToClose = List.from(_clients);
+    _clients.clear();
 
-    // Fecha individualmente cada socket de cliente
     for (var client in clientsToClose) {
       try {
         await client.socket.close(
@@ -1069,9 +959,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
 
     if (log) _log.info("Parando o servidor HTTP...");
     try {
-      await _server?.close(
-        force: true,
-      ); // force: true para fechar imediatamente
+      await _server?.close(force: true);
       if (log) _log.info("Servidor HTTP/WebSocket parado com sucesso.");
     } catch (e, s) {
       if (log) _log.warning("Erro ao fechar servidor HTTP", e, s);
@@ -1083,15 +971,15 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         _isServerRunning = false;
         _serverStatus = "Servidor parado.";
         _port = 0;
-        _serverIp = "Aguardando IP..."; // Resetar IP
-        _isLoading = false; // Não está mais carregando/tentando iniciar
-        _rodadaEndTimes.clear(); // Limpa os tempos de fim de rodada
+        _serverIp = "Aguardando IP...";
+        _isLoading = false;
+        _rodadaEndTimes.clear();
       });
     }
     if (log) _log.info('Processo de parada do servidor concluído.');
   }
 
-  /// 19. Navega para a tela de histórico de presenças.
+  /// Navega para a tela de histórico de presenças.
   void _navigateToHistorico(BuildContext context) {
     _log.info('Navegando para HistoricoScreen');
     Navigator.push(
@@ -1100,13 +988,13 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         builder: (context) => HistoricoScreen(
           presencas: _presencas,
           alunoNomes: _alunoNomes,
-          rodadas: _rodadas, // Passa a lista de rodadas
+          rodadas: _rodadas,
         ),
       ),
     );
   }
 
-  /// 20. Exibe uma SnackBar na parte inferior da tela.
+  /// Exibe uma SnackBar na parte inferior da tela.
   void _showSnackBar(String message, {bool isError = false}) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1118,11 +1006,10 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
   }
 
-  /// 21. Exporta o histórico de presenças para um arquivo CSV.
+  /// Exporta o histórico de presenças para um arquivo CSV.
   Future<void> _exportarCSV() async {
     _log.info("Iniciando exportação de CSV...");
-    var status = await Permission.storage
-        .request(); // Solicita permissão de armazenamento
+    var status = await Permission.storage.request();
     if (!status.isGranted) {
       _showSnackBar('Permissão de armazenamento negada.', isError: true);
       _log.warning('Permissão de armazenamento negada ao tentar exportar CSV.');
@@ -1130,7 +1017,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
 
     List<List<String>> rows = [];
-    // Cabeçalho do CSV
     rows.add([
       'matricula',
       'nome',
@@ -1146,14 +1032,12 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     final now = DateTime.now();
     final dataAtual = dateFormat.format(now);
 
-    List<String> matriculas = _presencas.keys.toList()
-      ..sort(); // Ordena as matrículas
+    List<String> matriculas = _presencas.keys.toList()..sort();
 
     for (var matricula in matriculas) {
       final presencasRodadas = _presencas[matricula]!;
       final nomeAluno = _alunoNomes[matricula] ?? 'Nome Desconhecido';
       for (var rodada in _rodadas) {
-        // Itera sobre todas as rodadas configuradas
         final status = presencasRodadas[rodada.nome] ?? 'Ausente';
         final gravadoEm = timeFormat.format(now);
         final metodoValidacao = _serverIp == "127.0.0.1"
@@ -1172,7 +1056,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       }
     }
 
-    // Formata o conteúdo CSV com aspas para lidar com vírgulas ou caracteres especiais
     String csvContent = rows
         .map(
           (row) =>
@@ -1181,18 +1064,14 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         .join('\n');
 
     try {
-      final directory =
-          await getDownloadsDirectory(); // Obtém o diretório de downloads
+      final directory = await getDownloadsDirectory();
       if (directory == null) {
         throw Exception('Não foi possível acessar o diretório de downloads.');
       }
       final path =
           '${directory.path}/smartpresence_presencas_${DateFormat('yyyyMMdd_HHmmss').format(now)}.csv';
       final file = File(path);
-      await file.writeAsString(
-        csvContent,
-        encoding: utf8,
-      ); // Escreve o arquivo com encoding UTF-8
+      await file.writeAsString(csvContent, encoding: utf8);
       _showSnackBar('CSV exportado para: ${file.path}');
       _log.info('CSV exportado com sucesso para: ${file.path}');
     } catch (e, s) {
@@ -1201,14 +1080,11 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     }
   }
 
-  // --- UI ---
   @override
   Widget build(BuildContext context) {
-    // ignore: deprecated_member_use
     return WillPopScope(
       onWillPop: () async {
         if (_isServerRunning) {
-          // Exibe um diálogo de confirmação se o servidor estiver rodando
           bool? sair = await showDialog<bool>(
             context: context,
             builder: (context) => AlertDialog(
@@ -1237,33 +1113,26 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           );
           return sair ?? false;
         }
-        return true; // Permite voltar se o servidor não estiver rodando
+        return true;
       },
       child: Scaffold(
         appBar: AppBar(
-          // Garante o botão de voltar quando aplicável
           leading: Navigator.canPop(context) ? const BackButton() : null,
-
-          // Força o título a alinhar à esquerda
           centerTitle: false,
-
-          // Reduz o espaçamento padrão ao redor do título para dar mais espaço
           titleSpacing: NavigationToolbar.kMiddleSpacing / 2,
-          // Usa Row + Expanded para maximizar o espaço do título
           title: Row(
             mainAxisAlignment: MainAxisAlignment.start,
             children: [
               Expanded(
                 child: const Text(
                   'Painel do Professor',
-                  overflow: TextOverflow.ellipsis, // Segurança contra overflow
+                  overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),
               ),
             ],
           ),
           actions: [
-            // Botão de Histórico
             IconButton(
               icon: const Icon(Icons.history),
               tooltip: 'Ver Histórico',
@@ -1273,7 +1142,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                   ? () => _navigateToHistorico(context)
                   : null,
             ),
-            // Botão de Exportar CSV
             IconButton(
               icon: const Icon(Icons.download),
               tooltip: 'Exportar CSV',
@@ -1283,7 +1151,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                   ? _exportarCSV
                   : null,
             ),
-            // Botão de Parar/Reiniciar Servidor
             if (_isServerRunning)
               IconButton(
                 icon: const Icon(Icons.stop_circle_outlined),
@@ -1306,7 +1173,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
 
   /// Constrói o corpo principal da tela, mostrando o estado de carregamento, erro ou o painel principal.
   Widget _buildBody() {
-    // Tela de carregamento
     if (_isLoading) {
       return Center(
         child: Column(
@@ -1314,15 +1180,11 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           children: [
             const CircularProgressIndicator(),
             const SizedBox(height: 20),
-            Text(
-              _serverStatus,
-              style: const TextStyle(fontSize: 16),
-            ), // Mostra o status de inicialização
+            Text(_serverStatus, style: const TextStyle(fontSize: 16)),
           ],
         ),
       );
     }
-    // Tela de erro se não há rodadas configuradas
     if (_rodadas.isEmpty) {
       return Center(
         child: Padding(
@@ -1337,7 +1199,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
               ),
               const SizedBox(height: 16),
               Text(
-                _serverStatus, // Mostra a mensagem de erro específica
+                _serverStatus,
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 18, color: Colors.black87),
               ),
@@ -1345,15 +1207,12 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
               ElevatedButton.icon(
                 icon: const Icon(Icons.settings),
                 label: const Text('Configurar Horários'),
-                onPressed: () =>
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const ConfiguracoesScreen(),
-                      ),
-                    ).then(
-                      (_) => _initializeServer(),
-                    ), // Re-inicializa ao retornar das configurações
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ConfiguracoesScreen(),
+                  ),
+                ).then((_) => _initializeServer()),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).primaryColor,
                   foregroundColor: Colors.white,
@@ -1370,74 +1229,55 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       );
     }
 
-    // Painel principal quando tudo está ok e o servidor está pronto
     return RefreshIndicator(
-      onRefresh:
-          _initializeServer, // Permite puxar para baixo para reiniciar o servidor
+      onRefresh: _initializeServer,
       child: ListView.builder(
-        itemCount: _rodadas.length + 1, // +1 para o card da lista de clientes
+        itemCount: _rodadas.length + 1,
         padding: const EdgeInsets.all(16),
         itemBuilder: (context, index) {
           if (index == 0) {
-            return _buildClientList(); // Primeiro item é o card da lista de clientes
+            return _buildClientList();
           }
-          final rodada =
-              _rodadas[index - 1]; // Demais itens são os cards das rodadas
+          final rodada = _rodadas[index - 1];
           return _buildRodadaCard(rodada);
         },
       ),
     );
   }
 
-  /// Widget que exibe o número de alunos conectados e o IP do servidor (Layout Melhorado).
+  /// Widget que exibe o número de alunos conectados e o IP do servidor.
   Widget _buildClientList() {
     return Card(
-      // --- Estilo Consistente com _buildRodadaCard ---
       elevation: 2,
-      margin: const EdgeInsets.only(
-        bottom: 16,
-      ), // Mesma margem dos cards de rodada
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12), // Mesmas bordas arredondadas
-      ),
-      // ---------------------------------------------
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ExpansionTile(
-        // Remove a cor de fundo padrão para usar a do Card
         backgroundColor: Colors.transparent,
         collapsedBackgroundColor: Colors.transparent,
-        // Ícone e Título
         leading: Icon(
           Icons.people_alt_rounded,
           color: Theme.of(context).primaryColor,
           size: 30,
-        ), // Ícone um pouco maior
+        ),
         title: Text(
           "${_clients.length} Alunos Conectados",
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 17,
-          ), // Ajuste de fonte
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
-        // Subtítulo com o IP/Porta
         subtitle: Text(
           _isServerRunning
               ? 'Servidor em: $_serverIp:$_port'
               : 'Servidor parado ou não iniciado.',
           style: const TextStyle(fontSize: 14, color: Colors.black54),
         ),
-        // Começa aberto se houver clientes ou se estiver carregando (para mostrar IP)
         initiallyExpanded: _clients.isNotEmpty || _isLoading,
-        // Espaçamento interno dos filhos (lista de alunos)
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         tilePadding: const EdgeInsets.symmetric(
           horizontal: 16.0,
           vertical: 8.0,
-        ), // Padding do header
+        ),
         children: _clients.isEmpty
             ? [
-                // Mensagem se não houver alunos
                 Padding(
-                  // Adiciona padding à mensagem
                   padding: const EdgeInsets.only(top: 8.0),
                   child: const Text(
                     "Nenhum aluno conectado no momento.",
@@ -1448,15 +1288,14 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                   ),
                 ),
               ]
-            : _clients // Lista de alunos
+            : _clients
                   .map(
                     (aluno) => ListTile(
-                      dense: true, // ListTile mais compacto
+                      dense: true,
                       leading: const Icon(Icons.person_outline, size: 20),
                       title: Text('${aluno.nome} (${aluno.matricula})'),
-                      subtitle: Text('IP: ${aluno.ip}'), // Mostra o IP do aluno
-                      contentPadding:
-                          EdgeInsets.zero, // Remove padding extra do ListTile
+                      subtitle: Text('IP: ${aluno.ip}'),
+                      contentPadding: EdgeInsets.zero,
                     ),
                   )
                   .toList(),
@@ -1464,23 +1303,21 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     );
   }
 
-  /// Widget que exibe um card para cada rodada, com status, PIN e botões de ação (Layout Melhorado v2).
+  /// Widget que exibe um card para cada rodada, com status, PIN e botões de ação.
   Widget _buildRodadaCard(Rodada rodada) {
-    // --- Definição de Cores e Ícones ---
     Color cardColor = Colors.white;
     Color accentColor = Colors.grey[600]!;
-    IconData iconData = Icons.schedule; // Ícone padrão
-    String statusDisplay = rodada.status; // Texto do status a ser exibido
+    IconData iconData = Icons.schedule;
+    String statusDisplay = rodada.status;
 
-    // --- Lógica de Tempo Restante ---
-    String? timeLeftFormatted; // Formato MM:SS
+    String? timeLeftFormatted;
     DateTime? endTime = _rodadaEndTimes[rodada.nome];
     Duration? remainingDuration;
 
     if (rodada.status == "Em Andamento") {
       cardColor = Theme.of(
         context,
-      ).primaryColor.withAlpha((0.05 * 255).round());
+      ).primaryColor.withAlpha((_cardOpacity * 255).round());
       accentColor = Theme.of(context).primaryColor;
       iconData = Icons.timer; // Ícone de timer quando em andamento
 
@@ -1492,8 +1329,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           timeLeftFormatted =
               '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
         } else {
-          statusDisplay =
-              'Encerrando...'; // Indica que o tempo acabou visualmente
+          statusDisplay = 'Encerrando...';
           timeLeftFormatted = '00:00';
         }
       }
@@ -1502,8 +1338,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
       accentColor = Colors.green[700]!;
       iconData = Icons.check_circle_outline;
     }
-
-    // --- Construção do Card ---
     return Card(
       elevation: 2,
       margin: const EdgeInsets.only(bottom: 16),
@@ -1518,20 +1352,16 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16.0), // Padding geral do Card
+        padding: const EdgeInsets.all(16.0),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // --- Ícone da Rodada (Esquerda) ---
             Icon(iconData, color: accentColor, size: 35),
             const SizedBox(width: 16),
-
-            // --- Informações da Rodada (Centro) ---
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Nome da Rodada
                   Text(
                     rodada.nome,
                     style: const TextStyle(
@@ -1540,14 +1370,11 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  // Horário de Início
                   Text(
                     'Início: ${rodada.horaInicio.format(context)}',
                     style: const TextStyle(fontSize: 14, color: Colors.black54),
                   ),
-                  // --- LAYOUT REVISADO PARA STATUS E TEMPO ---
-                  const SizedBox(height: 6), // Espaço extra
-                  // Exibe o Tempo Restante se aplicável
+                  const SizedBox(height: 6),
                   if (rodada.status == "Em Andamento" &&
                       timeLeftFormatted != null)
                     Row(
@@ -1559,7 +1386,7 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          timeLeftFormatted, // Mostra MM:SS
+                          timeLeftFormatted,
                           style: TextStyle(
                             fontSize: 16,
                             color: accentColor,
@@ -1569,7 +1396,6 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                         ),
                       ],
                     ),
-                  // Exibe o Status em uma linha separada (ou se não houver timer)
                   Text(
                     'Status: $statusDisplay',
                     style: TextStyle(
@@ -1582,19 +1408,17 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
                           : FontWeight.normal,
                     ),
                   ),
-                  // --- FIM LAYOUT REVISADO ---
                 ],
               ),
             ),
-            const SizedBox(width: 12), // Espaço antes das ações/PIN
-            // --- Ações / PIN (Direita) ---
+            const SizedBox(width: 12),
             Container(
               alignment: Alignment.centerRight,
               child: _buildRodadaActions(
                 rodada,
                 accentColor,
                 timeLeftFormatted,
-              ), // Chama o helper
+              ),
             ),
           ],
         ),
@@ -1602,13 +1426,12 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
     );
   }
 
-  /// Helper Widget para construir a seção de ações/PIN à direita do Card.
+  /// Widget auxiliar para construir a seção de ações/PIN à direita do Card.
   Widget _buildRodadaActions(
     Rodada rodada,
     Color accentColor,
     String? timeLeftFormatted,
   ) {
-    // Se estiver Aguardando e o servidor rodando, mostra o botão de Iniciar
     if (_isServerRunning && rodada.status == "Aguardando") {
       return IconButton(
         icon: Icon(
@@ -1619,24 +1442,21 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
         tooltip: 'Iniciar ${rodada.nome} Manualmente',
         onPressed: () => _startRodada(rodada, null),
       );
-    }
-    // Se estiver Em Andamento e o servidor rodando, mostra PIN e botão Encerrar
-    else if (_isServerRunning &&
+    } else if (_isServerRunning &&
         rodada.status == "Em Andamento" &&
         rodada.pin != null) {
       return Row(
-        mainAxisSize: MainAxisSize.min, // Encolhe o Row para caber
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Container estilizado para o PIN
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
               color: accentColor.withAlpha(
-                (0.1 * 255).round(),
-              ), // Fundo bem sutil
+                (_pinContainerOpacity * 255).round(),
+              ),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: accentColor.withAlpha((0.5 * 255).round()),
+                color: accentColor.withAlpha((_pinBorderOpacity * 255).round()),
                 width: 1,
               ),
             ),
@@ -1644,15 +1464,14 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
               rodada.pin!,
               style: TextStyle(
                 color: accentColor,
-                fontSize: 22, // Ligeiramente maior
+                fontSize: 22,
                 fontWeight: FontWeight.bold,
-                letterSpacing: 3, // Mais espaçado
+                letterSpacing: 3,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ),
           const SizedBox(width: 8),
-          // Botão de Encerrar Manual
           IconButton(
             icon: Icon(
               Icons.stop_circle_outlined,
@@ -1664,15 +1483,12 @@ class _ProfessorHostScreenState extends State<ProfessorHostScreen> {
           ),
         ],
       );
-    }
-    // Se Encerrada ou servidor parado, não mostra ações/PIN
-    else {
-      return const SizedBox(width: 40); // Placeholder para manter alinhamento
+    } else {
+      return const SizedBox(width: 40);
     }
   }
 }
 
-// Extensão helper para firstWhereOrNull em iteráveis
 extension IterableExtension<T> on Iterable<T> {
   T? firstWhereOrNull(bool Function(T) test) {
     for (var element in this) {

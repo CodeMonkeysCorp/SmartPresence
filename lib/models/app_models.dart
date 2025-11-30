@@ -1,14 +1,11 @@
-import 'package:flutter/material.dart'; // Para TimeOfDay
-import 'dart:io'; // Para WebSocket
+import 'package:flutter/material.dart';
+import 'dart:io';
 
-// Modelos do Aplicativo
-
-// Classe para representar uma rodada de chamada
 class Rodada {
   final String nome;
   TimeOfDay horaInicio;
-  String status; // Ex: "Aguardando", "Em Andamento", "Encerrada"
-  String? pin; // PIN gerado para a rodada, pode ser nulo
+  String status;
+  String? pin;
 
   Rodada({
     required this.nome,
@@ -18,13 +15,12 @@ class Rodada {
   });
 }
 
-// Classe para representar um aluno conectado ao servidor do professor
 class AlunoConectado {
-  final WebSocket socket; // O socket WebSocket do aluno
-  final String matricula; // Matrícula do aluno
-  final String nome; // Nome de exibição do aluno
-  final String ip; // Endereço IP do aluno >>>
-  final DateTime connectedAt; // Timestamp da conexão >>>
+  final WebSocket socket;
+  final String matricula;
+  final String nome;
+  final String ip;
+  final DateTime connectedAt;
 
   AlunoConectado({
     required this.socket,
